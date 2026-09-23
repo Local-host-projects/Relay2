@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+:root {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+body {
+  margin: 0;
+  background-image: radial-gradient(ellipse at 20% -10%, rgba(255, 255, 255, 0.35), transparent 45%),
+    repeating-linear-gradient(
+      180deg,
+      rgba(32, 27, 20, 0.012) 0px,
+      rgba(32, 27, 20, 0.012) 1px,
+      transparent 1px,
+      transparent 34px
+    );
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+@keyframes driftIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.anim-drift-in {
+  animation: driftIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes pulseAnim {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.anim-pulse-dot {
+  animation: pulseAnim 1.1s infinite;
+}
+
+.panel-sheet {
+  transform: translateY(100%);
+  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.panel-sheet.open {
+  transform: translateY(0);
+}
+
+.split-block {
+  transition: flex-basis 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.4s ease;
+}

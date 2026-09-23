@@ -1,0 +1,48 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./index.html', './src/**/*.{js,jsx}'],
+  darkMode: ['selector', '[data-theme="dark"]'],
+  theme: {
+    extend: {
+      colors: {
+        paper: '#ECE6D6',
+        paperDeep: '#E2DAC4',
+        ink: '#201B14',
+        inkSoft: '#6B6255',
+        inkFaint: '#9C9384',
+        rule: '#C6BCA2',
+        ruleStrong: '#A79C7F',
+        verified: '#3C6E4F',
+        verifiedBg: '#E1E9DB',
+        attention: '#9C6B1F',
+        attentionBg: '#EFE3C8',
+        problem: '#9C3B2E',
+        problemBg: '#EEDAD3',
+        accent: '#2B3A5E',
+        accentSoft: '#D8DCE6',
+
+        dpaper: '#211E19',
+        dpaperDeep: '#1A1815',
+        dink: '#EDE7D8',
+        dinkSoft: '#B3AA97',
+        dinkFaint: '#77705F',
+        drule: '#433D31',
+        druleStrong: '#55503F',
+        dverified: '#7FB88F',
+        dverifiedBg: '#26312A',
+        dattention: '#D2A85A',
+        dattentionBg: '#362D1C',
+        dproblem: '#D98B7B',
+        dproblemBg: '#392320',
+        daccent: '#9FB0D9',
+        daccentSoft: '#262B3A',
+      },
+      fontFamily: {
+        serif: ['"Source Serif 4"', 'serif'],
+        sans: ['"IBM Plex Sans"', 'sans-serif'],
+        mono: ['"IBM Plex Mono"', 'monospace'],
+      },
+    },
+  },
+  plugins: [],
+}
