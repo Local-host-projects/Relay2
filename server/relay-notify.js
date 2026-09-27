@@ -17,7 +17,8 @@ const http = require('http')
 const fs = require('fs')
 const path = require('path')
 
-const PORT = process.env.NOTIFY_PORT || 3001
+const PORT = process.env.PORT || process.env.NOTIFY_PORT || 3001
+const HOST = '0.0.0.0' // Pxxl health-checks require binding 0.0.0.0, not localhost
 const TERMII_BASE = 'https://api.ng.termii.com'
 
 // --- minimal .env loader (root .env) ---
@@ -104,6 +105,9 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    if ((url.pathname === '/' || url.pathname === '/api/health') && req.method === 'GET') {
+      return json(res, 200, { ok: true, service: 'relay-notify' })
+    }
     if (url.pathname === '/api/notify/status' && req.method === 'GET') {
       let balance = null
       if (TERMII_KEY) {
@@ -146,6 +150,6 @@ const server = http.createServer(async (req, res) => {
   }
 })
 
-server.listen(PORT, () => {
-  console.log('Relay notify server on :' + PORT + ' — SMS ' + (TERMII_KEY ? 'LIVE (sender ' + TERMII_SENDER + ', ' + TERMII_CHANNEL + ')' : 'demo (no TERMII_API_KEY)') + ' — email ' + (RESEND_KEY ? 'LIVE' : 'demo (no RESEND_API_KEY)'))
+server.listen(PORT, HOST, () => {
+  console.log('Relay notify server on ' + HOST + ':' + PORT + ' — SMS ' + (TERMII_KEY ? 'LIVE (sender ' + TERMII_SENDER + ', ' + TERMII_CHANNEL + ')' : 'demo (no TERMII_API_KEY)') + ' — email ' + (RESEND_KEY ? 'LIVE' : 'demo (no RESEND_API_KEY)'))
 })
