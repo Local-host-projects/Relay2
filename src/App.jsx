@@ -758,7 +758,7 @@ export default function App() {
           <div className="anim-drift-in">
             <h1 className="font-bold text-[24px] tracking-tight mb-1">Verification Board</h1>
             <p className="text-[13px] text-slate-500 mb-5">Review promise requests — approval issues them by SMS and email.</p>
-            <AdminBoard state={state} onApprove={approveRequest} onReject={rejectRequest} onApproveBusiness={approveBusiness} busyId={busyId} />
+            <AdminBoard state={state} onApprove={approveRequest} onReject={rejectRequest} onApproveBusiness={approveBusiness} busyId={busyId} showToast={showToast} />
           </div>
         )}
 
