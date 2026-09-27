@@ -1,0 +1,24 @@
+# Pxxl deployment contract — Relay (static web app + notify API).
+# Aliases here must match the saved service aliases in the Pxxl dashboard.
+# Secrets go in dashboard environment variables, NEVER in this file.
+version = 1
+
+[routing]
+spa = true
+
+[services.web]
+baseDirectory = "/"
+language = "javascript"
+framework = "vite"
+packageManager = "npm"
+installCommand = "npm ci"
+buildCommand = "npm run build"
+outputDirectory = "dist"
+
+[services.api]
+baseDirectory = "server"
+language = "javascript"
+packageManager = "npm"
+installCommand = "npm install --no-audit --no-fund"
+startCommand = "node relay-notify.js"
+port = 3001

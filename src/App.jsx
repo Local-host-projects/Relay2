@@ -13,18 +13,34 @@ import Toast from './components/Toast'
 import PromiseRow from './components/PromiseRow'
 import SplitVisual from './components/SplitVisual'
 import ChainSvg from './components/ChainSvg'
+import Knob from './components/Knob'
+import Auth from './components/Auth'
+import PayerDashboard from './components/PayerDashboard'
+import LPDashboard from './components/LPDashboard'
+import AdminBoard from './components/AdminBoard'
+import ReceiptZoom from './components/ReceiptZoom'
+import { notifyIssued } from './lib/notify'
 
 export default function App() {
   const [state, setState] = useState(initialState())
-  const [activePanel, setActivePanel] = useState(null) // 'claim' | 'transfer' | 'chain' | 'liquidity' | 'payers' | 'health' | 'transactions'
+  const [authed, setAuthed] = useState(false)
+  const [tab, setTab] = useState('home') // home | activity | business | lp | admin | me
+  const [busyId, setBusyId] = useState(null)
+  const [receipt, setReceipt] = useState(null) // {receipt, nodes} for ZUI viewer
+  const [activePanel, setActivePanel] = useState(null) // claim | pay | transfer | chain | liquidity | health | notifications
   const [activeClaimId, setActiveClaimId] = useState(null)
   const [transferMode, setTransferMode] = useState('transfer')
-  const [bubbleOpen, setBubbleOpen] = useState(false)
-  const [activeSection, setActiveSection] = useState('home')
   const [chainDetail, setChainDetail] = useState(null)
   const [liquidityClaimId, setLiquidityClaimId] = useState(null)
   const [toastMsg, setToastMsg] = useState('')
   const [toastShow, setToastShow] = useState(false)
+  const [payMode, setPayMode] = useState('relay')
+  const [extBank, setExtBank] = useState('')
+  const [extAcct, setExtAcct] = useState('')
+  const [showSearch, setShowSearch] = useState(false)
+  const [query, setQuery] = useState('')
+  const [kindFilter, setKindFilter] = useState('all')
+  const [hideBal, setHideBal] = useState(false)
   const toastTimer = useRef(null)
 
   function showToast(msg) {
@@ -38,7 +54,21 @@ export default function App() {
     setActivePanel(null)
   }
 
+  function go(t) {
+    setTab(t)
+    closePanel()
+    window.scrollTo({ top: 0 })
+  }
+
   const activeClaim = state.promises.find((p) => p.id === activeClaimId)
+  const relayTotal = state.promises.reduce((s, p) => s + p.remaining, 0)
+  const p8472 = state.promises.find((p) => p.id === 'p-8472')
+
+  const chainSummaryText = (() => {
+    if (!p8472 || !p8472.chain || p8472.chain.edges.length === 0) return 'A → B (you) · not yet forwarded'
+    const names = ['A', 'B'].concat(p8472.chain.edges.map((e) => e.to))
+    return names.join(' → ')
+  })()
 
   /* ---- Transfer ---- */
   const [splitStage, setSplitStage] = useState('before')
@@ -50,11 +80,12 @@ export default function App() {
 
   function openTransfer(id, mode) {
     setActiveClaimId(id)
-    setTransferMode(mode)
+    setTransferMode(mode || 'transfer')
     const p = state.promises.find((x) => x.id === id)
-    setRecipientInput(p.id === 'p-8472' && (!p.chain || p.chain.edges.length === 0) ? 'C' : p.id === 'p-8472' ? 'D' : '')
+    setRecipientInput(p && p.id === 'p-8472' && (!p.chain || p.chain.edges.length === 0) ? 'C' : p && p.id === 'p-8472' ? 'D' : '')
     setAmountInput('')
     setShowSplit(false)
+    setPayMode('relay')
     setActivePanel('transfer')
   }
 
@@ -62,8 +93,8 @@ export default function App() {
     const p = state.promises.find((x) => x.id === activeClaimId)
     const amt = parseFloat(amountInput)
     const recipient = recipientInput.trim() || '—'
-    if (!amt || amt <= 0 || amt > p.remaining) {
-      showToast('Enter an amount up to ' + fmt(p.remaining))
+    if (!p || !amt || amt <= 0 || amt > p.remaining) {
+      showToast('Enter an amount up to ' + fmt(p ? p.remaining : 0))
       return
     }
     setPendingAmt(amt)
@@ -87,9 +118,7 @@ export default function App() {
         return { ...prev, promises }
       })
       showToast(fmt(amt) + ' sent to ' + recipient + ' — spendable now, before settlement')
-      setTimeout(() => {
-        closePanel()
-      }, 700)
+      setTimeout(() => closePanel(), 700)
     }, 800)
   }
 
@@ -100,6 +129,7 @@ export default function App() {
     setTimeout(() => {
       setState((prev) => {
         const p = prev.promises.find((x) => x.id === 'p-8472')
+        if (!p) return prev
         const edges = p.chain ? p.chain.edges : []
         let totalForwarded = 0
         const newTx = edges.map((e) => {
@@ -121,7 +151,7 @@ export default function App() {
   }
 
   /* ---- Liquidity / Auction ---- */
-  const [auctionStage, setAuctionStage] = useState('idle') // idle | searching | offers
+  const [auctionStage, setAuctionStage] = useState('idle')
   const [offers, setOffers] = useState([])
   const [selectedOffer, setSelectedOffer] = useState(null)
   const [lqMin, setLqMin] = useState(0)
@@ -129,18 +159,21 @@ export default function App() {
 
   function openLiquidity(claimId) {
     const target = claimId ? state.promises.find((x) => x.id === claimId) : state.promises.find((x) => x.remaining > 0)
-    setLiquidityClaimId(target ? target.id : null)
+    if (!target) {
+      showToast('No spendable claims to cash out')
+      return
+    }
+    setLiquidityClaimId(target.id)
     setAuctionStage('idle')
     setSelectedOffer(null)
-    if (target) {
-      setLqMin(Math.round(target.remaining * 0.94))
-      setLqTarget(Math.round(target.remaining * 0.985))
-    }
+    setLqMin(Math.round(target.remaining * 0.94))
+    setLqTarget(Math.round(target.remaining * 0.985))
     setActivePanel('liquidity')
   }
 
   function runAuction() {
     const target = state.promises.find((x) => x.id === liquidityClaimId)
+    if (!target) return
     setAuctionStage('searching')
     setTimeout(() => {
       const providers = [
@@ -163,296 +196,776 @@ export default function App() {
     showToast('Sold to ' + pr.name + ' for ' + fmt(pr.amount))
   }
 
-  /* ---- Payers ---- */
-  const [pyName, setPyName] = useState('')
-  const [pyAmount, setPyAmount] = useState('')
-  const [pyDate, setPyDate] = useState('')
-
-  function createPromise() {
-    if (!pyName.trim() || !pyAmount) {
-      showToast('Fill in beneficiary and amount')
-      return
-    }
-    const amt = parseFloat(pyAmount)
+  /* ---- Verification queue: payers submit, admin approves, SMS+email fire ---- */
+  function issueBatch({ issuerType, issuerName, kind, escrowRef, settlement, items, note }) {
+    const t = Date.now()
+    const reqs = items.map((r, i) => ({
+      id: 'rq' + t + '-' + i,
+      kind,
+      issuerType,
+      issuerName,
+      escrowRef,
+      settlement: settlement || 'Pending',
+      note: note || '',
+      to: r.to,
+      phone: r.phone || '',
+      email: r.email || '',
+      amount: r.amount,
+      ref: '',
+      status: 'pending',
+      created: 'now',
+    }))
     setState((prev) => ({
       ...prev,
+      notifications: [{ id: 'n' + t, text: 'Sent ' + reqs.length + ' promise request' + (reqs.length === 1 ? '' : 's') + ' to the verification board', time: 'now' }, ...prev.notifications],
+      requests: [...reqs, ...prev.requests],
+    }))
+    showToast(reqs.length + ' request' + (reqs.length === 1 ? '' : 's') + ' sent for verification')
+    setTimeout(() => closePanel(), 800)
+  }
+
+  async function approveRequest(id) {
+    const r = state.requests.find((x) => x.id === id)
+    if (!r || r.status !== 'pending') return
+    setBusyId(id)
+    const t = Date.now()
+    const kindLabel = r.kind === 'escrow' ? 'Escrow-locked' : r.kind === 'in-transit' ? 'In-transit' : 'Trusted'
+    const results = await notifyIssued({ phone: r.phone, email: r.email, name: r.to, amount: fmt(r.amount), issuerName: r.issuerName, ref: r.ref || ('RL-' + t.toString().slice(-6)) })
+    const live = results.some((x) => !x.demo && x.ok)
+    setState((prev) => ({
+      ...prev,
+      promises: [
+        {
+          id: 'p-' + t,
+          amount: r.amount,
+          remaining: r.amount,
+          from: r.issuerName + ' (' + r.issuerType + ')',
+          to: r.to,
+          label: 'To ' + r.to,
+          settlement: r.settlement || 'Pending',
+          status: 'verified',
+          spendable: true,
+          health: r.kind === 'escrow' ? 'attention' : 'healthy',
+          kind: r.kind,
+          escrowRef: r.escrowRef || '',
+          pendingAccept: false,
+        },
+        ...prev.promises,
+      ],
       payerPromises: [
-        { id: 'pp' + Date.now(), amount: amt, to: pyName.trim(), settlement: pyDate.trim() || 'Pending', status: 'verified' },
+        { id: 'pp' + t, amount: r.amount, to: r.to, phone: r.phone, settlement: r.settlement || 'Pending', status: 'verified', kind: r.kind, issuerType: r.issuerType, issuerName: r.issuerName, escrowRef: r.escrowRef || '' },
         ...prev.payerPromises,
       ],
+      notifications: [
+        { id: 'n' + t, text: kindLabel + ' promise issued — ' + fmt(r.amount) + ' to ' + r.to + ' via ' + (live ? 'live SMS/email' : 'demo SMS/email'), time: 'now' },
+        ...prev.notifications,
+      ],
+      requests: prev.requests.map((x) => (x.id === id ? { ...x, status: 'approved' } : x)),
     }))
-    showToast('Promise created — ' + fmt(amt) + ' spendable by ' + pyName.trim() + ' now')
-    setPyName('')
-    setPyAmount('')
-    setPyDate('')
+    setBusyId(null)
+    showToast('Approved — ' + fmt(r.amount) + ' issued to ' + r.to + (live ? ' (live)' : ' (demo)'))
   }
 
-  /* ---- Nav ---- */
-  function summon(target) {
-    setBubbleOpen(false)
-    setActiveSection(target)
-    if (target === 'home') {
-      closePanel()
-      return
-    }
-    if (target === 'chain') {
-      setChainDetail(null)
-      setActivePanel('chain')
-      return
-    }
-    if (target === 'liquidity') {
-      openLiquidity(null)
-      return
-    }
-    if (target === 'payers') {
-      setActivePanel('payers')
-      return
-    }
-    if (target === 'transactions') {
-      setActivePanel('transactions')
-      return
-    }
+  function rejectRequest(id) {
+    setState((prev) => ({ ...prev, requests: prev.requests.map((x) => (x.id === id ? { ...x, status: 'rejected' } : x)) }))
+    showToast('Request rejected')
   }
 
-  const relayTotal = state.promises.reduce((s, p) => s + p.remaining, 0)
-  const p8472 = state.promises.find((p) => p.id === 'p-8472')
+  function approveBusiness() {
+    setState((prev) => ({ ...prev, business: { ...prev.business, verified: true } }))
+    showToast('Business verified — trusted issuance unlocked')
+  }
 
-  const chainSummaryText = (() => {
-    if (!p8472.chain || p8472.chain.edges.length === 0) return 'A → B (you) · not yet forwarded'
-    const names = ['A', 'B'].concat(p8472.chain.edges.map((e) => e.to))
-    return names.join(' → ')
-  })()
+  function registerBusiness({ name, rc, type }) {
+    if (!name) {
+      showToast('Add a business name')
+      return
+    }
+    setState((prev) => ({ ...prev, business: { name, rc, type, verified: false } }))
+    showToast('Business submitted for verification')
+  }
 
-  const navItems = [
-    { key: 'home', label: 'Home' },
-    { key: 'chain', label: 'Chain' },
-    { key: 'liquidity', label: 'Liquidity' },
-    { key: 'payers', label: 'Payers' },
-    { key: 'transactions', label: 'Transactions' },
+  function addWorker({ name, phone, email, salary }) {
+    if (!name || !salary || salary <= 0) {
+      showToast('Add worker name + salary')
+      return
+    }
+    const w = { id: 'w' + Date.now(), name, phone, email, salary }
+    setState((prev) => ({ ...prev, workers: [...prev.workers, w] }))
+    showToast(name + ' added to roster')
+  }
+
+  function removeWorker(id) {
+    setState((prev) => ({ ...prev, workers: prev.workers.filter((w) => w.id !== id), requests: prev.requests }))
+  }
+
+  function payWorkers(ids) {
+    const list = state.workers.filter((w) => ids.includes(w.id) && Number(w.salary) > 0)
+    if (list.length === 0) {
+      showToast('Select at least one worker with salary')
+      return
+    }
+    const t = Date.now()
+    const issuerName = state.business.name || 'Employer'
+    const reqs = list.map((w, i) => ({
+      id: 'rq' + t + '-' + i, kind: 'trusted', issuerType: 'employer', issuerName, escrowRef: '',
+      settlement: 'Month end', note: 'Salary', to: w.name, phone: w.phone || '', email: w.email || '',
+      amount: Number(w.salary), ref: '', status: 'pending', created: 'now',
+    }))
+    setState((prev) => ({ ...prev, requests: [...reqs, ...prev.requests] }))
+    showToast(list.length + ' salary requests sent for verification')
+  }
+
+  function createReceipt({ to, phone, email, amount, ref, settlement }) {
+    if (!to || !amount || amount <= 0) {
+      showToast('Add recipient + amount')
+      return
+    }
+    const issuerName = state.business.name || 'Payer'
+    const r = {
+      id: 'rq' + Date.now(), kind: 'in-transit', issuerType: state.business.type || 'other', issuerName, escrowRef: '',
+      settlement: settlement || 'Pending', note: '', to, phone: phone || '', email: email || '',
+      amount, ref: ref || '', status: 'pending', created: 'now',
+    }
+    setState((prev) => ({ ...prev, requests: [r, ...prev.requests] }))
+    showToast('In-transit receipt submitted for verification')
+  }
+
+  function lockEscrow({ purpose, amount, beneficiary, partner, release }) {
+    if (!purpose || !amount || amount <= 0) {
+      showToast('Add purpose + amount')
+      return
+    }
+    const e = { id: 'es' + Date.now(), purpose, amount, beneficiary, partner, release, status: 'locked' }
+    setState((prev) => ({ ...prev, escrows: [e, ...prev.escrows] }))
+    showToast(fmt(amount) + ' locked in escrow')
+  }
+
+  function buyClaim(id, discountPct) {
+    const p = state.promises.find((x) => x.id === id)
+    if (!p || p.remaining <= 0) {
+      showToast('Claim no longer available')
+      return
+    }
+    const price = Math.round(p.remaining * (1 - discountPct / 100))
+    setState((prev) => ({
+      ...prev,
+      available: prev.available + price,
+      promises: prev.promises.map((x) => (x.id === id ? { ...x, remaining: 0 } : x)),
+      lpPortfolio: [{ id: 'h' + Date.now(), claimId: id, face: p.remaining, paid: price, label: p.label, settlement: p.settlement }, ...prev.lpPortfolio],
+    }))
+    showToast('Bought for ' + fmt(price) + ' — collect ' + fmt(p.remaining) + ' on settlement')
+  }
+
+  function openReceipt(p) {
+    const edges = p.id === 'p-8472' && p.chain ? p.chain.edges : []
+    const nodes = [{ name: p.from || 'Issuer', amount: p.amount }, { name: 'You', amount: p.remaining }]
+    edges.forEach((e) => nodes.push({ name: e.to, amount: e.amount }))
+    setReceipt({
+      receipt: {
+        amount: p.amount,
+        from: p.from,
+        to: p.to,
+        ref: p.id.toUpperCase(),
+        settlement: p.settlement,
+        date: new Date().toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }),
+      },
+      nodes,
+    })
+  }
+
+  function acceptPromise(id) {
+    setState((prev) => ({ ...prev, promises: prev.promises.map((p) => (p.id === id ? { ...p, pendingAccept: false } : p)) }))
+    showToast('Promise accepted — spendable now')
+  }
+
+  function declinePromise(id) {
+    setState((prev) => ({ ...prev, promises: prev.promises.filter((p) => p.id !== id) }))
+    showToast('Promise declined')
+  }
+
+  function sendExternal() {
+    const p = state.promises.find((x) => x.id === activeClaimId)
+    const amt = parseFloat(amountInput)
+    if (!p || !amt || amt <= 0 || amt > p.remaining) {
+      showToast('Enter an amount up to ' + fmt(p ? p.remaining : 0))
+      return
+    }
+    if (!extBank.trim() || !extAcct.trim()) {
+      showToast('Add bank + account for external payout')
+      return
+    }
+    const bidId = 'xb' + Date.now()
+    setState((prev) => ({
+      ...prev,
+      promises: prev.promises.map((pr) => (pr.id === activeClaimId ? { ...pr, remaining: pr.remaining - amt } : pr)),
+      externalBids: [{ id: bidId, claimId: activeClaimId, amount: amt, bank: extBank.trim(), acct: extAcct.trim(), status: 'open — LP pays ' + extAcct.trim() + ' directly, takes claim at discount' }, ...prev.externalBids],
+    }))
+    showToast('External bid open — LP pays ' + fmt(amt) + ' to ' + extAcct.trim())
+    setTimeout(() => closePanel(), 700)
+  }
+
+  /* ---- Filtering ---- */
+  const spendable = state.promises.filter((p) => p.remaining > 0)
+  const visiblePromises = spendable.filter((p) => {
+    if (kindFilter !== 'all' && (p.kind || '') !== kindFilter) return false
+    if (!query.trim()) return true
+    const q = query.trim().toLowerCase()
+    return (p.label + ' ' + p.from + ' ' + p.to + ' ' + (p.kind || '') + ' ' + p.settlement).toLowerCase().includes(q)
+  })
+
+  if (!authed) {
+    return (
+      <div className="min-h-screen text-slate-900">
+        <Auth
+          initialPhone={state.user.phone}
+          onComplete={({ phone, role }) => {
+            const landing = role === 'payer' ? 'business' : role === 'lp' ? 'lp' : role === 'admin' ? 'admin' : 'home'
+            setState((prev) => ({ ...prev, user: { ...prev.user, phone: phone || prev.user.phone, pinSet: true, role: role || 'user' } }))
+            setTab(landing)
+            setAuthed(true)
+            showToast('Welcome to Relay')
+          }}
+        />
+      {receipt && (
+        <ReceiptZoom receipt={receipt.receipt} nodes={receipt.nodes} onClose={() => setReceipt(null)} />
+      )}
+
+      <Toast message={toastMsg} show={toastShow} />
+      </div>
+    )
+  }
+
+  function switchRole(role) {
+    const landing = role === 'payer' ? 'business' : role === 'lp' ? 'lp' : role === 'admin' ? 'admin' : 'home'
+    setState((prev) => ({ ...prev, user: { ...prev.user, role } }))
+    go(landing)
+  }
+
+  const nav = [
+    { key: 'home', label: 'Home', icon: 'ph-fill ph-house' },
+    { key: 'activity', label: 'Activity', icon: 'ph-bold ph-receipt' },
+    { key: 'cash', label: 'Cash', icon: 'ph-bold ph-banknote', action: () => openLiquidity(null) },
+    { key: 'me', label: 'Me', icon: 'ph-bold ph-user' },
   ]
 
   return (
-    <div>
-      <div className="max-w-[560px] mx-auto min-h-screen bg-paper dark:bg-dpaper px-[22px] pt-7 pb-[140px] relative shadow-[0_0_60px_rgba(0,0,0,0.15)]">
-        {/* Masthead */}
-        <div className="flex items-baseline justify-between border-b-2 border-ink dark:border-dink pb-2.5 mb-1">
-          <div className="font-serif font-semibold text-[26px] tracking-tight">Relay</div>
-          <div className="text-[12px] text-inkSoft dark:text-dinkSoft tabular-nums">
-            {new Date().toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
-          </div>
-        </div>
-        <div className="text-[11.5px] text-inkFaint dark:text-dinkFaint tracking-wide mb-6 uppercase">
-          Money that's confirmed, spendable before it settles
-        </div>
-
-        {/* Available */}
-        <div className="text-[11px] tracking-wide text-inkFaint dark:text-dinkFaint mb-3.5">Available</div>
-        <div className="font-serif font-semibold text-[44px] leading-none tabular-nums my-0.5">{fmt(state.available)}</div>
-        <div className="text-[13px] text-inkSoft dark:text-dinkSoft">Settled — yours to spend freely</div>
-
-        <hr className="border-t border-ruleStrong dark:border-druleStrong my-6" />
-
-        {/* Relay */}
-        <div className="flex justify-between items-center text-[11px] tracking-wide text-inkFaint dark:text-dinkFaint mb-3.5">
-          <span>Relay</span>
-          <span>{fmt(relayTotal)}</span>
-        </div>
+    <div className="min-h-screen text-slate-900 flex flex-col md:flex-row">
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex flex-col w-72 shrink-0 min-h-screen glass-panel z-40 p-6 justify-between border-r border-white/60 sticky top-0 h-screen">
         <div>
-          {state.promises
-            .filter((p) => p.remaining > 0)
-            .map((p) => (
-              <PromiseRow
-                key={p.id}
-                p={p}
-                onClick={() => {
-                  setActiveClaimId(p.id)
-                  setActivePanel('claim')
-                }}
-              />
+          <div className="flex items-center gap-3 mb-10 px-2">
+            <div className="w-10 h-10 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-lg">
+              <span className="font-bold text-2xl italic">R</span>
+            </div>
+            <div>
+              <h1 className="font-bold text-xl tracking-tight leading-none">Relay</h1>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Future money OS</p>
+            </div>
+          </div>
+          <nav className="space-y-2">
+            {[
+              { key: 'home', label: 'Home', icon: 'ph-fill ph-house' },
+              { key: 'activity', label: 'Activity', icon: 'ph-bold ph-receipt' },
+              { key: 'business', label: 'Business', icon: 'ph-bold ph-bank' },
+              { key: 'lp', label: 'Liquidity Desk', icon: 'ph-bold ph-banknote' },
+              { key: 'admin', label: 'Verification', icon: 'ph-fill ph-shield-check' },
+              { key: 'me', label: 'Profile', icon: 'ph-bold ph-user' },
+            ].map((n) => (
+              <button
+                key={n.key}
+                onClick={() => go(n.key)}
+                className={`w-full flex items-center gap-4 px-4 py-3 rounded-2xl transition-all ${tab === n.key ? 'bg-slate-900 text-white shadow-xl' : 'text-slate-500 hover:bg-white/60 hover:text-slate-900'}`}
+              >
+                <i className={`${n.icon} text-xl`}></i>
+                <span className="font-medium">{n.label}</span>
+                {n.key === 'admin' && state.requests.some((r) => r.status === 'pending') && (
+                  <span className="ml-auto w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                    {state.requests.filter((r) => r.status === 'pending').length}
+                  </span>
+                )}
+              </button>
             ))}
-        </div>
-
-        <hr className="border-t border-ruleStrong dark:border-druleStrong my-6" />
-
-        {/* Chain */}
-        <div className="text-[11px] tracking-wide text-inkFaint dark:text-dinkFaint mb-3.5">Chain</div>
-        <div className="font-mono text-[13px] text-inkSoft dark:text-dinkSoft">{chainSummaryText}</div>
-        <div className="text-[13px] text-inkSoft dark:text-dinkSoft mt-1.5">Tap the bubble below, then Chain, to trace it</div>
-
-        <hr className="border-t border-ruleStrong dark:border-druleStrong my-6" />
-
-        {/* Transactions */}
-        <div className="text-[11px] tracking-wide text-inkFaint dark:text-dinkFaint mb-3.5">Transactions</div>
-        {state.transactions.length === 0 ? (
-          <div className="text-[13px] text-inkFaint dark:text-dinkFaint py-2.5">Nothing has settled yet.</div>
-        ) : (
-          state.transactions.map((t, i) => (
-            <div key={i} className="flex items-start justify-between py-4 px-1 border-b border-rule dark:border-drule last:border-b-0">
-              <div>
-                <div className="font-serif font-semibold text-[21px] tabular-nums">{fmt(t.amount)}</div>
-                <div className="text-[12.5px] text-inkSoft dark:text-dinkSoft mt-1">{t.desc}</div>
-              </div>
-              <div className="text-[10.5px] tracking-wide uppercase text-inkSoft dark:text-dinkSoft flex items-center">
-                <Dot health="healthy" />
-                Settled
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Bubble nav */}
-      <div
-        className="fixed right-5 z-[60] flex flex-col-reverse items-end gap-2.5"
-        style={{ bottom: 'calc(24px + env(safe-area-inset-bottom, 0px))' }}
-      >
-        <div
-          className={`flex flex-col items-end gap-2 mb-1 transition-all duration-150 ${
-            bubbleOpen ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-2 pointer-events-none'
-          }`}
-        >
-          {navItems.map((item) => (
-            <div
-              key={item.key}
-              onClick={() => summon(item.key)}
-              className={`bg-paper dark:bg-dpaper border ${
-                activeSection === item.key ? 'border-ink dark:border-dink' : 'border-ruleStrong dark:border-druleStrong'
-              } text-ink dark:text-dink text-[13px] px-4 py-2 rounded-full cursor-pointer shadow-md whitespace-nowrap flex items-center gap-2`}
+            <button
+              onClick={() => openLiquidity(null)}
+              className="w-full flex items-center gap-4 px-4 py-3 rounded-2xl text-slate-500 hover:bg-white/60 hover:text-slate-900 transition-all"
             >
-              {item.label}
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${
-                  activeSection === item.key ? 'bg-verified dark:bg-dverified' : 'bg-ruleStrong dark:bg-druleStrong'
-                }`}
-              ></span>
-            </div>
-          ))}
+              <i className="ph-bold ph-cash text-xl"></i>
+              <span className="font-medium">Cash out</span>
+            </button>
+          </nav>
         </div>
-        <button
-          onClick={() => setBubbleOpen((o) => !o)}
-          className="w-[54px] h-[54px] rounded-full bg-ink dark:bg-dink text-paper dark:text-dpaper flex items-center justify-center font-serif text-xl shadow-lg active:scale-95 transition-transform border-none"
-        >
-          ●
-        </button>
-      </div>
+        <div className="p-5 rounded-3xl bg-white border border-slate-100 shadow-sm">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Spendable now</p>
+          <p className="text-xl font-bold tabular-nums tracking-tight mt-1">{fmt(relayTotal)}</p>
+          <button onClick={() => go('activity')} className="mt-3 w-full py-2.5 rounded-xl bg-slate-900 text-white text-[13px] font-bold btn-invert">View chain</button>
+        </div>
+      </aside>
 
-      {/* Scrim */}
-      <div
-        className={`fixed inset-0 bg-black/40 z-[70] transition-opacity duration-200 ${
-          activePanel ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-        }`}
-        onClick={closePanel}
-      ></div>
+      {/* Main */}
+      <main className="flex-1 min-w-0 w-full max-w-[560px] md:max-w-2xl mx-auto px-5 md:px-8 pt-5 md:pt-8 pb-32 md:pb-16">
+        {tab === 'home' && (
+          <div className="anim-drift-in">
+            {/* Header */}
+            <header className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-3">
+                <div className="md:hidden w-10 h-10 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-lg">
+                  <span className="font-bold text-xl italic">R</span>
+                </div>
+                <div>
+                  <p className="text-[11px] text-slate-400 font-medium">Good day,</p>
+                  <h1 className="font-bold text-[19px] tracking-tight leading-tight">{state.user.relayId} · {state.user.phone}</h1>
+                </div>
+              </div>
+              <button onClick={() => setActivePanel('notifications')} className="w-11 h-11 rounded-full glass-card flex items-center justify-center text-slate-600 relative tap-target">
+                <i className="ph-bold ph-bell text-xl"></i>
+                {state.notifications.length > 0 && (
+                  <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">{state.notifications.length}</span>
+                )}
+              </button>
+            </header>
 
-      {/* Claim panel */}
-      <Panel open={activePanel === 'claim'} onClose={closePanel}>
-        {activeClaim && (
-          <div>
-            <PanelTitle>{fmt(activeClaim.remaining)}</PanelTitle>
-            <KV k="From" v={activeClaim.from} />
-            <KV k="To" v={activeClaim.to} />
-            <KV
-              k="Status"
-              v={
-                <span className="flex items-center">
-                  <Dot health={activeClaim.health} />
-                  {activeClaim.status}
-                </span>
-              }
-            />
-            <KV k="Settlement" v={activeClaim.settlement} />
-            <KV k="Available now" v={fmt(activeClaim.remaining)} />
-            <div className="flex gap-2 flex-wrap mt-4.5 mb-1.5">
-              <Btn onClick={() => openTransfer(activeClaim.id, 'transfer')}>Transfer</Btn>
-              <Btn variant="secondary" onClick={() => openTransfer(activeClaim.id, 'spend')}>
-                Spend
-              </Btn>
-              <Btn
-                variant="secondary"
-                onClick={() => {
-                  closePanel()
-                  setTimeout(() => openLiquidity(activeClaim.id), 250)
-                }}
-              >
-                Sell for cash
-              </Btn>
+            {/* Balance card */}
+            <div className="dark-card rounded-[28px] p-6 text-white relative overflow-hidden mb-4">
+              <div className="absolute -top-16 -right-16 w-56 h-56 bg-blue-500/20 rounded-full blur-3xl pointer-events-none"></div>
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Settled balance</p>
+                <button onClick={() => setHideBal((h) => !h)} className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center tap-target">
+                  <i className={`ph-bold ${hideBal ? 'ph-eye-slash' : 'ph-eye'} text-lg`}></i>
+                </button>
+              </div>
+              <p className="fluid-display font-bold tabular-nums mt-1.5">{hideBal ? '••••••' : fmt(state.available)}</p>
+              <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Promise balance · spendable</p>
+                  <p className="font-bold text-[19px] tabular-nums mt-0.5 text-emerald-300">{hideBal ? '••••••' : fmt(relayTotal)}</p>
+                </div>
+                <button onClick={() => openLiquidity(null)} className="px-5 h-11 rounded-2xl bg-white text-slate-900 text-[13px] font-bold btn-invert tap-target">Cash out</button>
+              </div>
             </div>
-            <div className="flex gap-2 flex-wrap">
-              <Btn
-                variant="secondary"
-                onClick={() => {
-                  setChainDetail(null)
-                  setActivePanel('chain')
-                }}
-              >
-                View chain
-              </Btn>
-              <Btn variant="secondary" onClick={() => setActivePanel('health')}>
-                Health
-              </Btn>
-              {activeClaim.id === 'p-8472' && (
-                <Btn variant="secondary" onClick={settleChain}>
-                  Settle now (demo)
-                </Btn>
+
+            {/* Quick actions */}
+            <div className="grid grid-cols-4 gap-2 mb-5">
+              {[
+                { l: 'Send', icon: 'ph-fill ph-paper-plane-tilt', fn: () => setActivePanel('pay') },
+                { l: 'Cash out', icon: 'ph-fill ph-banknote', fn: () => openLiquidity(null) },
+                { l: 'Top up', icon: 'ph-bold ph-plus', fn: () => showToast('Demo — top-ups arrive as promise units') },
+                { l: 'Business', icon: 'ph-fill ph-bank', fn: () => go('business') },
+              ].map((a) => (
+                <button key={a.l} onClick={a.fn} className="flex flex-col items-center gap-2 tap-target">
+                  <span className="w-14 h-14 rounded-3xl glass-card flex items-center justify-center text-slate-900">
+                    <i className={`${a.icon} text-2xl`}></i>
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-600">{a.l}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Promises header + collapsible search */}
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-bold text-[17px] tracking-tight">Spendable now</h2>
+              <button onClick={() => setShowSearch((s) => !s)} className="h-10 px-4 rounded-full bg-white border border-slate-200 flex items-center gap-2 text-[13px] font-semibold text-slate-600 shadow-sm tap-target">
+                <i className={`ph-bold ${showSearch ? 'ph-x' : 'ph-magnifying-glass'}`}></i>
+                {showSearch ? 'Close' : 'Search'}
+              </button>
+            </div>
+            {showSearch && (
+              <div className="anim-drift-in mb-3">
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search promises, senders, dates…"
+                  className="w-full h-[52px] px-4 rounded-2xl border border-slate-200 bg-white/80 text-[14px] font-medium placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:border-slate-900"
+                />
+                <div className="flex gap-2 mt-2.5 overflow-x-auto no-scrollbar">
+                  {[
+                    { k: 'all', l: 'All' },
+                    { k: 'trusted', l: 'Salary' },
+                    { k: 'in-transit', l: 'In-transit' },
+                    { k: 'escrow', l: 'Escrow' },
+                  ].map((c) => (
+                    <button
+                      key={c.k}
+                      onClick={() => setKindFilter(c.k)}
+                      className={`px-4 h-9 rounded-full text-[12px] font-bold whitespace-nowrap tap-target ${kindFilter === c.k ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-500'}`}
+                    >
+                      {c.l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Promise cards */}
+            <div className="space-y-2.5">
+              {visiblePromises.map((p) => (
+                <div key={p.id}>
+                  <PromiseRow
+                    p={p}
+                    onClick={() => {
+                      setActiveClaimId(p.id)
+                      setActivePanel('claim')
+                    }}
+                  />
+                  {p.pendingAccept && (
+                    <div className="flex gap-2 mt-2">
+                      <Btn onClick={() => acceptPromise(p.id)}>Accept</Btn>
+                      <Btn variant="secondary" onClick={() => declinePromise(p.id)}>Decline</Btn>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {visiblePromises.length === 0 && (
+                <div className="glass-card rounded-3xl p-6 text-center text-[13px] text-slate-400">
+                  {spendable.length === 0 ? 'Nothing spendable right now — new promises arrive by SMS.' : 'No matches for this search / filter.'}
+                </div>
+              )}
+            </div>
+
+            {/* Recent activity */}
+            <h2 className="font-bold text-[17px] tracking-tight mt-7 mb-3">Recent activity</h2>
+            <div className="glass-card rounded-[28px] p-2">
+              {state.externalBids.slice(0, 3).map((b) => (
+                <div key={b.id} className="flex items-center gap-3 p-3">
+                  <div className="w-11 h-11 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                    <i className="ph-fill ph-bank text-xl"></i>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-[15px] tabular-nums">{fmt(b.amount)} → {b.bank}</p>
+                    <p className="text-[12px] text-slate-400 truncate">{b.status}</p>
+                  </div>
+                </div>
+              ))}
+              {state.transactions.slice(0, 5).map((t, i) => (
+                <div key={i} className="flex items-center gap-3 p-3">
+                  <div className="w-11 h-11 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                    <i className="ph-fill ph-check-circle text-xl"></i>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-[15px] tabular-nums">{fmt(t.amount)}</p>
+                    <p className="text-[12px] text-slate-400 truncate">{t.desc}</p>
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0">Settled</span>
+                </div>
+              ))}
+              {state.transactions.length === 0 && state.externalBids.length === 0 && (
+                <p className="text-[13px] text-slate-400 text-center py-4">Nothing settled yet — forwards resolve here, FIFO.</p>
               )}
             </div>
           </div>
         )}
+
+        {tab === 'activity' && (
+          <div className="anim-drift-in">
+            <h1 className="font-bold text-[24px] tracking-tight mb-1">Activity</h1>
+            <p className="text-[13px] text-slate-500 mb-5">Every forward, traced to origin. Settlement pays FIFO.</p>
+
+            <div className="glass-card rounded-[28px] p-5 mb-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
+                  <i className="ph-bold ph-git-branch text-lg"></i>
+                </div>
+                <div>
+                  <h3 className="font-bold text-[16px] tracking-tight">Promise #8472 chain</h3>
+                  <p className="font-medium text-[12.5px] text-slate-500 break-all">{chainSummaryText}</p>
+                </div>
+              </div>
+              <div className="chain-scroll">
+                {p8472 && (
+                  <ChainSvg
+                    promise={p8472}
+                    onNode={(name) => {
+                      const edgesIn = [{ from: 'A', to: 'B (you)', amount: 5000 }].concat(p8472.chain ? p8472.chain.edges : []).filter((e) => e.to === name)
+                      const edgesOut = (p8472.chain ? p8472.chain.edges : []).filter((e) => e.from === name)
+                      const received = edgesIn.reduce((s, e) => s + e.amount, 0)
+                      const sent = edgesOut.reduce((s, e) => s + e.amount, 0)
+                      setChainDetail({ type: 'node', name, received, sent })
+                    }}
+                    onEdge={(from, to, amount) => setChainDetail({ type: 'edge', from, to, amount })}
+                  />
+                )}
+              </div>
+              {!chainDetail && <p className="text-[12.5px] text-slate-400 mt-1">Tap a node or a line to inspect it.</p>}
+              {chainDetail && chainDetail.type === 'node' && (
+                <div className="mt-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-1.5">{chainDetail.name}</p>
+                  <KV k="Received" v={fmt(chainDetail.received)} />
+                  {chainDetail.sent > 0 && <KV k="Forwarded" v={fmt(chainDetail.sent)} />}
+                  <KV k="Remaining" v={fmt(chainDetail.received - chainDetail.sent)} />
+                </div>
+              )}
+              {chainDetail && chainDetail.type === 'edge' && (
+                <div className="mt-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-1.5">{chainDetail.from} → {chainDetail.to}</p>
+                  <KV k="Amount" v={fmt(chainDetail.amount)} />
+                  <KV k="Parent claim" v="Promise #8472" />
+                  <KV k="Status" v="Pending settlement" />
+                </div>
+              )}
+            </div>
+
+            <div className="glass-card rounded-[28px] p-5">
+              <h3 className="font-bold text-[16px] tracking-tight mb-2">Settlements</h3>
+              {state.transactions.length === 0 ? (
+                <p className="text-[13px] text-slate-400 py-2">Nothing settled yet.</p>
+              ) : (
+                state.transactions.map((t, i) => (
+                  <div key={i} className="flex items-center gap-3 py-3 border-b border-slate-100 last:border-b-0">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-[15px] tabular-nums">{fmt(t.amount)}</p>
+                      <p className="text-[12px] text-slate-400 truncate">{t.desc}</p>
+                    </div>
+                    <span className="inline-flex items-center text-[10px] font-bold uppercase tracking-wider text-slate-400 shrink-0">
+                      <Dot health="healthy" /> Settled
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'business' && (
+          <div className="anim-drift-in">
+            <button onClick={() => go('me')} className="md:hidden flex items-center gap-2 text-[13px] font-bold text-slate-500 mb-3 tap-target">
+              <i className="ph-bold ph-arrow-left"></i> Back to profile
+            </button>
+            <h1 className="font-bold text-[24px] tracking-tight mb-1">Business</h1>
+            <p className="text-[13px] text-slate-500 mb-5">Issue verified future payments — employer, bank, merchant. Recipients spend before settlement.</p>
+            <PayerDashboard
+              state={state}
+              onIssue={issueBatch}
+              onRegisterBusiness={registerBusiness}
+              onAddWorker={addWorker}
+              onRemoveWorker={removeWorker}
+              onPayWorkers={payWorkers}
+              onCreateReceipt={createReceipt}
+              onLockEscrow={lockEscrow}
+            />
+          </div>
+        )}
+
+        {tab === 'lp' && (
+          <div className="anim-drift-in">
+            <h1 className="font-bold text-[24px] tracking-tight mb-1">Liquidity Desk</h1>
+            <p className="text-[13px] text-slate-500 mb-5">Buy spendable claims at a discount — collect face value on settlement.</p>
+            <LPDashboard state={state} onBuy={buyClaim} />
+          </div>
+        )}
+
+        {tab === 'admin' && (
+          <div className="anim-drift-in">
+            <h1 className="font-bold text-[24px] tracking-tight mb-1">Verification Board</h1>
+            <p className="text-[13px] text-slate-500 mb-5">Review promise requests — approval issues them by SMS and email.</p>
+            <AdminBoard state={state} onApprove={approveRequest} onReject={rejectRequest} onApproveBusiness={approveBusiness} busyId={busyId} showToast={showToast} />
+          </div>
+        )}
+
+        {tab === 'me' && (
+          <div className="anim-drift-in">
+            <h1 className="font-bold text-[24px] tracking-tight mb-5">Profile</h1>
+            <div className="glass-card rounded-[28px] p-5 flex items-center gap-4 mb-4">
+              <div className="w-14 h-14 rounded-full bg-slate-900 text-white flex items-center justify-center text-xl font-bold">B</div>
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-[16px]">{state.user.phone}</p>
+                <p className="text-[12px] text-slate-400">Relay ID {state.user.relayId} · PIN {state.user.pinSet ? 'set · 2FA on' : 'not set'}</p>
+              </div>
+              <button onClick={() => { setAuthed(false); setTab('home') }} className="w-11 h-11 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-500 tap-target" title="Sign out">
+                <i className="ph-bold ph-sign-out text-lg"></i>
+              </button>
+            </div>
+
+            <div className="glass-card rounded-[28px] p-5 mb-4">
+              <h3 className="font-bold text-[15px] mb-3">Workspace</h3>
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400 mb-2">Acting as · {state.user.role || 'user'}</p>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { k: 'user', l: 'Personal', icon: 'ph-fill ph-user' },
+                  { k: 'payer', l: 'Payer', icon: 'ph-fill ph-bank' },
+                  { k: 'lp', l: 'LP Desk', icon: 'ph-fill ph-banknote' },
+                  { k: 'admin', l: 'Admin', icon: 'ph-fill ph-shield-check' },
+                ].map((r) => (
+                  <button key={r.k} onClick={() => switchRole(r.k)}
+                    className={`tap-target rounded-2xl border py-2.5 flex flex-col items-center gap-1 ${state.user.role === r.k ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-200 text-slate-500'}`}>
+                    <i className={`${r.icon} text-lg`}></i>
+                    <span className="text-[10px] font-bold">{r.l}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button onClick={() => go('business')} className="w-full dark-card rounded-[28px] p-5 text-white flex items-center gap-4 mb-4 text-left">
+              <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center shrink-0">
+                <i className="ph-fill ph-bank text-2xl"></i>
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-[15px]">Payers dashboard</p>
+                <p className="text-[12px] text-slate-400">Issue salary & payouts as spendable promises</p>
+              </div>
+              <i className="ph-bold ph-caret-right text-slate-400"></i>
+            </button>
+
+            <div className="glass-card rounded-[28px] p-5 mb-4">
+              <h3 className="font-bold text-[15px] mb-1">How Relay works</h3>
+              <p className="text-[13px] text-slate-500 leading-relaxed">1. A bank, merchant or employer confirms money coming to you.<br />2. You get SMS — account auto-created from your phone number.<br />3. Spend or forward the promise before it settles.<br />4. On settlement day, money routes directly to whoever holds each piece — FIFO.</p>
+            </div>
+
+            <div className="glass-card rounded-[28px] p-5">
+              <h3 className="font-bold text-[15px] mb-3">Notifications · SMS layer</h3>
+              {state.notifications.length === 0 ? (
+                <p className="text-[13px] text-slate-400">No notifications.</p>
+              ) : (
+                state.notifications.map((n) => (
+                  <div key={n.id} className="py-2.5 border-b border-slate-100 last:border-b-0 text-[13.5px]">
+                    <p>{n.text}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">{n.time} · SMS + in-app</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Mobile bottom nav */}
+      <nav className="md:hidden fixed bottom-0 left-0 w-full z-50 p-4 pb-6 pointer-events-none">
+        <div className="glass-panel pointer-events-auto rounded-[28px] flex justify-around items-center h-[72px] px-2 shadow-2xl">
+          <button onClick={() => go('home')} className={`flex flex-col items-center justify-center w-12 h-12 tap-target ${tab === 'home' ? 'text-slate-900' : 'text-slate-400'}`}>
+            <i className={`${tab === 'home' ? 'ph-fill ph-house' : 'ph-bold ph-house'} text-2xl`}></i>
+          </button>
+          <button onClick={() => go('activity')} className={`flex flex-col items-center justify-center w-12 h-12 tap-target ${tab === 'activity' ? 'text-slate-900' : 'text-slate-400'}`}>
+            <i className={`${tab === 'activity' ? 'ph-fill ph-receipt' : 'ph-bold ph-receipt'} text-2xl`}></i>
+          </button>
+          <button onClick={() => setActivePanel('pay')} className="w-14 h-14 -mt-10 bg-slate-900 rounded-full flex items-center justify-center shadow-[0_10px_30px_rgba(15,23,42,0.35)] border-[5px] border-[#eef1f4] hover:-translate-y-1 transition-transform tap-target" aria-label="Pay">
+            <i className="ph-bold ph-plus text-white text-xl"></i>
+          </button>
+          <button onClick={() => openLiquidity(null)} className="flex flex-col items-center justify-center w-12 h-12 text-slate-400 tap-target" aria-label="Cash out">
+            <i className="ph-bold ph-banknote text-2xl"></i>
+          </button>
+          <button onClick={() => go('me')} className={`flex flex-col items-center justify-center w-12 h-12 tap-target ${['me', 'business', 'lp', 'admin'].includes(tab) ? 'text-slate-900' : 'text-slate-400'}`}>
+            <i className={`${['me', 'business', 'lp', 'admin'].includes(tab) ? 'ph-fill ph-user' : 'ph-bold ph-user'} text-2xl`}></i>
+          </button>
+        </div>
+      </nav>
+
+      {/* Scrim */}
+      <div
+        className={`fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-[70] transition-opacity duration-200 ${activePanel ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onClick={closePanel}
+      ></div>
+
+      {/* Pay picker */}
+      <Panel open={activePanel === 'pay'} onClose={closePanel}>
+        <PanelTitle>Pay from…</PanelTitle>
+        <p className="text-[13px] text-slate-500 mb-4">Choose which spendable balance to pay with.</p>
+        <div className="space-y-2.5">
+          {spendable.map((p) => (
+            <button key={p.id} onClick={() => openTransfer(p.id, 'transfer')} className="w-full text-left glass-card rounded-3xl p-4 flex items-center gap-3 btn-invert">
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-[16px] tabular-nums">{fmt(p.remaining)}</p>
+                <p className="text-[12px] text-slate-500 truncate">{p.label} · {p.settlement}</p>
+              </div>
+              <i className="ph-bold ph-caret-right text-slate-400"></i>
+            </button>
+          ))}
+          {spendable.length === 0 && <p className="text-[13px] text-slate-400">Nothing spendable right now.</p>}
+        </div>
       </Panel>
 
-      {/* Transfer panel */}
-      <Panel open={activePanel === 'transfer'} onClose={closePanel}>
+      {/* Claim detail */}
+      <Panel open={activePanel === 'claim'} onClose={closePanel}>
         {activeClaim && (
           <div>
-            <PanelTitle>
-              {transferMode === 'spend' ? 'Spend' : 'Transfer'} from {fmt(activeClaim.remaining)}
-            </PanelTitle>
-            <Field label="Amount">
-              <TextInput type="number" value={amountInput} onChange={(e) => setAmountInput(e.target.value)} placeholder="e.g. 2000" />
-            </Field>
-            <Field label="Recipient">
-              <TextInput type="text" value={recipientInput} onChange={(e) => setRecipientInput(e.target.value)} placeholder="e.g. C" />
-            </Field>
-            {showSplit && (
-              <SplitVisual
-                total={activeClaim.remaining + (splitStage === 'after' ? pendingAmt : 0)}
-                amt={pendingAmt}
-                recipient={pendingRecipient}
-                stage={splitStage}
-              />
-            )}
-            <Btn className="w-full mt-1" onClick={confirmTransfer}>
-              {transferMode === 'spend' ? 'Spend' : 'Split & send'}
-            </Btn>
-            <div className="text-[13px] text-inkSoft dark:text-dinkSoft mt-2.5">
-              {transferMode === 'spend'
-                ? "This leaves your merchant's system as settled cash to them; your claim divides the same way as a transfer."
-                : 'The claim splits immediately — your recipient can spend or forward it before anything settles.'}
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Spendable now</p>
+            <p className="font-bold text-[30px] tabular-nums tracking-tight">{fmt(activeClaim.remaining)}</p>
+            <div className="mt-2">
+              <KV k="From" v={activeClaim.from} />
+              <KV k="To" v={activeClaim.to} />
+              <KV k="Status" v={<span className="inline-flex items-center"><Dot health={activeClaim.health} />{activeClaim.status}</span>} />
+              <KV k="Settlement" v={activeClaim.settlement} />
+              <KV k="Type" v={activeClaim.kind || 'claim'} />
+            </div>
+            <div className="flex gap-2 mt-4 mb-2">
+              <Btn onClick={() => openTransfer(activeClaim.id, 'transfer')}>Send</Btn>
+              <Btn variant="secondary" onClick={() => openTransfer(activeClaim.id, 'spend')}>Spend</Btn>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <Btn variant="secondary" onClick={() => { closePanel(); setTimeout(() => openLiquidity(activeClaim.id), 250) }}>Cash out</Btn>
+              <Btn variant="secondary" onClick={() => { setChainDetail(null); setActivePanel('chain') }}>Chain</Btn>
+              <Btn variant="secondary" onClick={() => { openReceipt(activeClaim); }}>Receipt</Btn>
+              <Btn variant="secondary" onClick={() => setActivePanel('health')}>Health</Btn>
+              {activeClaim.id === 'p-8472' && <Btn variant="secondary" onClick={settleChain}>Settle (demo)</Btn>}
             </div>
           </div>
         )}
       </Panel>
 
-      {/* Chain panel */}
+      {/* Transfer */}
+      <Panel open={activePanel === 'transfer'} onClose={closePanel}>
+        {activeClaim && (
+          <div>
+            <PanelTitle>{transferMode === 'spend' ? 'Spend' : 'Send'} · {fmt(activeClaim.remaining)} available</PanelTitle>
+            <div className="grid grid-cols-2 rounded-2xl bg-slate-100 border border-slate-200 text-[12px] font-bold uppercase tracking-wide mb-4 overflow-hidden">
+              <button onClick={() => setPayMode('relay')} className={`tap-target py-2.5 ${payMode === 'relay' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}>Relay → Relay</button>
+              <button onClick={() => setPayMode('external')} className={`tap-target py-2.5 ${payMode === 'external' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}>Relay → Bank</button>
+            </div>
+            <Field label="Amount">
+              <TextInput type="number" value={amountInput} onChange={(e) => setAmountInput(e.target.value)} placeholder="e.g. 2000" />
+            </Field>
+            {payMode === 'relay' ? (
+              <Field label="Recipient Relay ID / phone">
+                <TextInput type="text" value={recipientInput} onChange={(e) => setRecipientInput(e.target.value)} placeholder="e.g. C / 0803…" />
+              </Field>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+                <Field label="Bank">
+                  <TextInput type="text" value={extBank} onChange={(e) => setExtBank(e.target.value)} placeholder="e.g. GTBank" />
+                </Field>
+                <Field label="Account number">
+                  <TextInput type="text" value={extAcct} onChange={(e) => setExtAcct(e.target.value)} placeholder="0123456789" />
+                </Field>
+              </div>
+            )}
+            {showSplit && payMode === 'relay' && (
+              <SplitVisual total={activeClaim.remaining + (splitStage === 'after' ? pendingAmt : 0)} amt={pendingAmt} recipient={pendingRecipient} stage={splitStage} />
+            )}
+            {payMode === 'relay' ? (
+              <Btn className="w-full mt-1" onClick={confirmTransfer}>{transferMode === 'spend' ? 'Spend now' : 'Split & send'}</Btn>
+            ) : (
+              <Btn className="w-full mt-1" onClick={sendExternal}>Open bid — LP pays bank</Btn>
+            )}
+            <p className="text-[12.5px] text-slate-500 mt-3 leading-relaxed">
+              {payMode === 'relay'
+                ? 'The claim splits immediately — your recipient spends it before anything settles. FIFO on settle.'
+                : 'A liquidity provider pays the bank account now and takes your claim at a discount.'}
+            </p>
+          </div>
+        )}
+      </Panel>
+
+      {/* Chain detail */}
       <Panel open={activePanel === 'chain'} onClose={closePanel}>
-        <PanelTitle>Chain</PanelTitle>
-        <div className="w-full overflow-x-auto py-1.5 pb-3.5">
-          <ChainSvg
-            promise={p8472}
-            onNode={(name) => {
-              const edgesIn = [{ from: 'A', to: 'B (you)', amount: 5000 }].concat(p8472.chain.edges).filter((e) => e.to === name)
-              const edgesOut = p8472.chain.edges.filter((e) => e.from === name)
-              const received = edgesIn.reduce((s, e) => s + e.amount, 0)
-              const sent = edgesOut.reduce((s, e) => s + e.amount, 0)
-              setChainDetail({ type: 'node', name, received, sent })
-            }}
-            onEdge={(from, to, amount) => setChainDetail({ type: 'edge', from, to, amount })}
-          />
+        <PanelTitle>Chain · FIFO</PanelTitle>
+        <div className="chain-scroll pb-2">
+          {p8472 && (
+            <ChainSvg
+              promise={p8472}
+              onNode={(name) => {
+                const edgesIn = [{ from: 'A', to: 'B (you)', amount: 5000 }].concat(p8472.chain ? p8472.chain.edges : []).filter((e) => e.to === name)
+                const edgesOut = (p8472.chain ? p8472.chain.edges : []).filter((e) => e.from === name)
+                const received = edgesIn.reduce((s, e) => s + e.amount, 0)
+                const sent = edgesOut.reduce((s, e) => s + e.amount, 0)
+                setChainDetail({ type: 'node', name, received, sent })
+              }}
+              onEdge={(from, to, amount) => setChainDetail({ type: 'edge', from, to, amount })}
+            />
+          )}
         </div>
-        {!chainDetail && <div className="text-[13px] text-inkFaint dark:text-dinkFaint py-2.5">Tap a node or a line to inspect it.</div>}
+        {!chainDetail && <p className="text-[13px] text-slate-400 py-2">Tap a node or a line to inspect it.</p>}
         {chainDetail && chainDetail.type === 'node' && (
           <div>
-            <div className="text-[11px] tracking-wide uppercase text-inkFaint dark:text-dinkFaint mt-4.5 mb-2">{chainDetail.name}</div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mt-3 mb-1">{chainDetail.name}</p>
             <KV k="Received" v={fmt(chainDetail.received)} />
             {chainDetail.sent > 0 && <KV k="Forwarded" v={fmt(chainDetail.sent)} />}
             <KV k="Remaining" v={fmt(chainDetail.received - chainDetail.sent)} />
@@ -460,9 +973,7 @@ export default function App() {
         )}
         {chainDetail && chainDetail.type === 'edge' && (
           <div>
-            <div className="text-[11px] tracking-wide uppercase text-inkFaint dark:text-dinkFaint mt-4.5 mb-2">
-              {chainDetail.from} → {chainDetail.to}
-            </div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mt-3 mb-1">{chainDetail.from} → {chainDetail.to}</p>
             <KV k="Amount" v={fmt(chainDetail.amount)} />
             <KV k="Parent claim" v="Promise #8472" />
             <KV k="Status" v="Pending settlement" />
@@ -470,78 +981,62 @@ export default function App() {
         )}
       </Panel>
 
-      {/* Liquidity panel */}
+      {/* Liquidity */}
       <Panel open={activePanel === 'liquidity'} onClose={closePanel}>
         {(() => {
           const target = state.promises.find((x) => x.id === liquidityClaimId)
           if (!target)
             return (
               <div>
-                <PanelTitle>Liquidity</PanelTitle>
-                <div className="text-[13px] text-inkFaint dark:text-dinkFaint py-2.5">No spendable claims to sell right now.</div>
+                <PanelTitle>Cash out</PanelTitle>
+                <p className="text-[13px] text-slate-400 py-2">No spendable claims right now.</p>
               </div>
             )
+          const profit = target.remaining - (selectedOffer ? selectedOffer.amount : lqTarget || 0)
+          const profitPct = target.remaining ? ((profit / target.remaining) * 100).toFixed(1) : '0.0'
           return (
             <div>
-              <PanelTitle>Get cash now</PanelTitle>
-              <KV k="Claim value" v={fmt(target.remaining)} />
+              <PanelTitle>Cash out · {fmt(target.remaining)}</PanelTitle>
               <KV k="Settlement" v={target.settlement} />
-              <Field label="Your minimum">
-                <TextInput type="number" value={lqMin} onChange={(e) => setLqMin(e.target.value)} />
-              </Field>
-              <Field label="Your target">
-                <TextInput type="number" value={lqTarget} onChange={(e) => setLqTarget(e.target.value)} />
-              </Field>
-              {auctionStage === 'idle' && (
-                <Btn className="w-full" onClick={runAuction}>
-                  Let Relay search offers
-                </Btn>
-              )}
-              {auctionStage === 'searching' && (
-                <div className="text-[13px] text-inkSoft dark:text-dinkSoft flex items-center gap-2 mt-2.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-attention dark:bg-dattention anim-pulse-dot"></span>
-                  Searching liquidity providers…
+              <KV k="Type" v={target.kind || 'claim'} />
+              <div className="rounded-3xl border border-slate-200 mt-4 mb-2 overflow-hidden">
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 px-4 py-2.5 bg-slate-50 border-b border-slate-100">Discount dials — drag to rotate</p>
+                <div className="flex justify-around items-center gap-4 py-5 bg-white">
+                  <Knob value={Number(lqMin) || 0} min={Math.round(target.remaining * 0.85)} max={target.remaining} onChange={setLqMin} label="Minimum" />
+                  <Knob value={Number(lqTarget) || 0} min={Math.round(target.remaining * 0.85)} max={target.remaining} onChange={setLqTarget} label="Target" />
                 </div>
+                <p className="text-[12px] font-semibold px-4 py-2.5 bg-slate-50 border-t border-slate-100">Provider keeps ~{fmt(Math.max(0, target.remaining - (Number(lqTarget) || 0)))} ({profitPct}%)</p>
+              </div>
+              {auctionStage === 'idle' && <Btn className="w-full" onClick={runAuction}>Find cash offers</Btn>}
+              {auctionStage === 'searching' && (
+                <p className="text-[13px] text-slate-500 flex items-center gap-2 mt-3">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 anim-pulse-dot"></span>
+                  Searching liquidity providers…
+                </p>
               )}
               {auctionStage === 'offers' && (
                 <div>
-                  <div className="text-[11px] tracking-wide uppercase text-inkFaint dark:text-dinkFaint mt-4.5 mb-2">
-                    3 providers available
-                  </div>
-                  <div className="relative h-[150px] my-2.5">
-                    {offers.map((pr, i) => {
-                      const positions = [
-                        { top: 8, left: '6%' },
-                        { top: 60, left: '52%' },
-                        { top: 100, left: '20%' },
-                      ]
-                      const isSelected = selectedOffer && selectedOffer.name === pr.name
-                      const isReceded = selectedOffer && selectedOffer.name !== pr.name
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mt-4 mb-2">3 providers found</p>
+                  <div className="space-y-2">
+                    {offers.map((pr) => {
+                      const isSel = selectedOffer && selectedOffer.name === pr.name
                       return (
-                        <div
+                        <button
                           key={pr.name}
                           onClick={() => setSelectedOffer(pr)}
-                          className={`absolute anim-drift-in bg-paper dark:bg-dpaper border rounded-full px-3.5 py-2 text-[13px] cursor-pointer shadow-md transition-all duration-200 ${
-                            isSelected
-                              ? 'border-ink dark:border-dink bg-accentSoft dark:bg-daccentSoft scale-110 z-10'
-                              : 'border-ruleStrong dark:border-druleStrong'
-                          } ${isReceded ? 'opacity-25 scale-90' : ''}`}
-                          style={{ top: positions[i].top, left: positions[i].left, animationDelay: i * 0.12 + 's' }}
+                          className={`anim-drift-in w-full text-left rounded-2xl px-4 py-3.5 border transition-all ${isSel ? 'bg-slate-900 text-white border-slate-900 shadow-xl' : 'bg-white border-slate-200'}`}
                         >
-                          <b className="font-serif">{fmt(pr.amount)}</b> — {pr.name}
-                        </div>
+                          <b className="tabular-nums">{fmt(pr.amount)}</b> <span className={isSel ? 'text-slate-300' : 'text-slate-500'}>— {pr.name}</span>
+                        </button>
                       )
                     })}
                   </div>
-                  <div className="text-[13px] text-inkSoft dark:text-dinkSoft">Tap an offer to select it.</div>
                   {selectedOffer && (
                     <div className="mt-3">
-                      <KV k="Receive now" v={fmt(selectedOffer.amount)} />
+                      <KV k="You receive" v={fmt(selectedOffer.amount)} />
                       <KV k="Claim value" v={fmt(target.remaining)} />
-                      <KV k="Difference" v={fmt(target.remaining - selectedOffer.amount)} />
-                      <Btn className="w-full mt-3" onClick={() => acceptOffer(selectedOffer)}>
-                        Accept {selectedOffer.name}
-                      </Btn>
+                      <KV k="Discount" v={fmt(target.remaining - selectedOffer.amount)} />
+                      <Btn className="w-full mt-3" onClick={() => acceptOffer(selectedOffer)}>Accept {selectedOffer.name}</Btn>
                     </div>
                   )}
                 </div>
@@ -551,41 +1046,7 @@ export default function App() {
         })()}
       </Panel>
 
-      {/* Payers panel */}
-      <Panel open={activePanel === 'payers'} onClose={closePanel}>
-        <PanelTitle>Payer workspace</PanelTitle>
-        <div className="text-[13px] text-inkSoft dark:text-dinkSoft mb-3.5">
-          Issue a verified future payment — the recipient can spend it before it settles.
-        </div>
-        <Field label="Beneficiary">
-          <TextInput type="text" value={pyName} onChange={(e) => setPyName(e.target.value)} placeholder="e.g. B" />
-        </Field>
-        <Field label="Amount">
-          <TextInput type="number" value={pyAmount} onChange={(e) => setPyAmount(e.target.value)} placeholder="e.g. 150000" />
-        </Field>
-        <Field label="Settlement date">
-          <TextInput type="text" value={pyDate} onChange={(e) => setPyDate(e.target.value)} placeholder="e.g. Sept 30" />
-        </Field>
-        <Btn className="w-full" onClick={createPromise}>
-          Create Relay promise
-        </Btn>
-        <div className="text-[11px] tracking-wide uppercase text-inkFaint dark:text-dinkFaint mt-5.5 mb-2">Active promises</div>
-        {state.payerPromises.map((pp) => (
-          <div key={pp.id} className="flex items-start justify-between py-4 px-1 border-b border-rule dark:border-drule last:border-b-0">
-            <div>
-              <div className="font-serif font-semibold text-[21px] tabular-nums">{fmt(pp.amount)}</div>
-              <div className="text-[12.5px] text-inkSoft dark:text-dinkSoft mt-1">To {pp.to}</div>
-              <div className="text-[12.5px] text-inkFaint dark:text-dinkFaint">{pp.settlement}</div>
-            </div>
-            <div className="text-[10.5px] tracking-wide uppercase text-inkSoft dark:text-dinkSoft flex items-center">
-              <Dot health="healthy" />
-              {pp.status}
-            </div>
-          </div>
-        ))}
-      </Panel>
-
-      {/* Health panel */}
+      {/* Health */}
       <Panel open={activePanel === 'health'} onClose={closePanel}>
         {activeClaim &&
           (() => {
@@ -596,26 +1057,20 @@ export default function App() {
             return (
               <div>
                 <PanelTitle>Transaction health</PanelTitle>
-                <div
-                  className={`inline-flex items-center text-[10.5px] tracking-wide uppercase mb-3.5 ${
-                    activeClaim.health === 'healthy' ? 'text-verified dark:text-dverified' : 'text-attention dark:text-dattention'
-                  }`}
-                >
+                <p className={`inline-flex items-center text-[11px] font-bold uppercase tracking-wider mb-3 ${activeClaim.health === 'healthy' ? 'text-emerald-700' : 'text-amber-700'}`}>
                   <Dot health={activeClaim.health} />
                   {activeClaim.health === 'healthy' ? 'Healthy' : 'Attention'}
-                </div>
+                </p>
                 {checks.map((c, i) => (
-                  <div key={i} className="flex items-center gap-2 py-2 text-[13.5px] border-b border-rule dark:border-drule last:border-b-0">
-                    <span className="text-verified dark:text-dverified font-semibold">✓</span>
+                  <div key={i} className="flex items-center gap-2.5 py-2.5 text-[13.5px] border-b border-slate-100 last:border-b-0">
+                    <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[11px] font-bold">✓</span>
                     {c}
                   </div>
                 ))}
                 {activeClaim.health !== 'healthy' && (
-                  <div className="text-[13px] text-inkSoft dark:text-dinkSoft mt-2.5">
-                    Settlement source is still confirming — nothing you need to act on yet.
-                  </div>
+                  <p className="text-[13px] text-slate-500 mt-2.5">Settlement source is still confirming — nothing you need to do.</p>
                 )}
-                <div className="mt-3.5">
+                <div className="mt-3">
                   <KV k="Settlement" v={activeClaim.settlement} />
                   <KV k="Last checked" v={new Date().toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })} />
                 </div>
@@ -624,22 +1079,16 @@ export default function App() {
           })()}
       </Panel>
 
-      {/* Transactions panel */}
-      <Panel open={activePanel === 'transactions'} onClose={closePanel}>
-        <PanelTitle>Transactions</PanelTitle>
-        {state.transactions.length === 0 ? (
-          <div className="text-[13px] text-inkFaint dark:text-dinkFaint py-2.5">Nothing has settled yet.</div>
+      {/* Notifications */}
+      <Panel open={activePanel === 'notifications'} onClose={closePanel}>
+        <PanelTitle>Notifications</PanelTitle>
+        {state.notifications.length === 0 ? (
+          <p className="text-[13px] text-slate-400">No notifications.</p>
         ) : (
-          state.transactions.map((t, i) => (
-            <div key={i} className="flex items-start justify-between py-4 px-1 border-b border-rule dark:border-drule last:border-b-0">
-              <div>
-                <div className="font-serif font-semibold text-[21px] tabular-nums">{fmt(t.amount)}</div>
-                <div className="text-[12.5px] text-inkSoft dark:text-dinkSoft mt-1">{t.desc}</div>
-              </div>
-              <div className="text-[10.5px] tracking-wide uppercase text-inkSoft dark:text-dinkSoft flex items-center">
-                <Dot health="healthy" />
-                Settled
-              </div>
+          state.notifications.map((n) => (
+            <div key={n.id} className="py-3 border-b border-slate-100 last:border-b-0 text-[13.5px]">
+              <p>{n.text}</p>
+              <p className="text-[11px] text-slate-400 mt-0.5">{n.time} · SMS + in-app</p>
             </div>
           ))
         )}
