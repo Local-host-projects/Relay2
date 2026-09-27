@@ -1,7 +1,17 @@
 export function initialState() {
   return {
     available: 18200,
-    user: { phone: '0803 123 4567', relayId: 'B-0421', pinSet: true },
+    user: { phone: '0803 123 4567', relayId: 'B-0421', pinSet: true, role: 'user', name: 'Bello' },
+    business: { name: '', rc: '', type: 'employer', verified: false },
+    workers: [
+      { id: 'w1', name: 'Adaeze O.', phone: '0803 111 2222', email: 'adaeze@example.com', salary: 250000 },
+      { id: 'w2', name: 'Chidi M.', phone: '0803 333 4444', email: 'chidi@example.com', salary: 180000 },
+    ],
+    escrows: [],
+    requests: [
+      { id: 'rq1', kind: 'trusted', issuerType: 'employer', issuerName: 'Aethercode Ltd', to: 'Adaeze O.', phone: '0803 111 2222', email: 'adaeze@example.com', amount: 250000, settlement: 'Sept 30', note: 'Sept salary', status: 'pending', created: 'now' },
+    ],
+    lpPortfolio: [],
     notifications: [
       { id: 'n1', text: 'Promise #8472 verified — ₦5,000 spendable now', time: 'now' },
       { id: 'n2', text: 'Salary promise verified — settles Sept 30', time: '2h' },

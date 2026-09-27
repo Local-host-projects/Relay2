@@ -16,11 +16,17 @@ import ChainSvg from './components/ChainSvg'
 import Knob from './components/Knob'
 import Auth from './components/Auth'
 import PayerDashboard from './components/PayerDashboard'
+import LPDashboard from './components/LPDashboard'
+import AdminBoard from './components/AdminBoard'
+import ReceiptZoom from './components/ReceiptZoom'
+import { notifyIssued } from './lib/notify'
 
 export default function App() {
   const [state, setState] = useState(initialState())
   const [authed, setAuthed] = useState(false)
-  const [tab, setTab] = useState('home') // home | activity | business | me
+  const [tab, setTab] = useState('home') // home | activity | business | lp | admin | me
+  const [busyId, setBusyId] = useState(null)
+  const [receipt, setReceipt] = useState(null) // {receipt, nodes} for ZUI viewer
   const [activePanel, setActivePanel] = useState(null) // claim | pay | transfer | chain | liquidity | health | notifications
   const [activeClaimId, setActiveClaimId] = useState(null)
   const [transferMode, setTransferMode] = useState('transfer')
@@ -190,40 +196,182 @@ export default function App() {
     showToast('Sold to ' + pr.name + ' for ' + fmt(pr.amount))
   }
 
-  /* ---- Issuance (employer / bank pipeline) ---- */
+  /* ---- Verification queue: payers submit, admin approves, SMS+email fire ---- */
   function issueBatch({ issuerType, issuerName, kind, escrowRef, settlement, items, note }) {
     const t = Date.now()
-    const kindLabel = kind === 'escrow' ? 'Escrow-locked' : kind === 'in-transit' ? 'In-transit' : 'Trusted'
-    const newPromises = items.map((r, i) => ({
-      id: 'p-' + t + '-' + i,
-      amount: r.amount,
-      remaining: r.amount,
-      from: issuerName + ' (' + issuerType + ')',
-      to: r.to,
-      label: 'To ' + r.to,
-      settlement: settlement || 'Pending',
-      status: 'verified',
-      spendable: true,
-      health: kind === 'escrow' ? 'attention' : 'healthy',
+    const reqs = items.map((r, i) => ({
+      id: 'rq' + t + '-' + i,
       kind,
+      issuerType,
+      issuerName,
       escrowRef,
-      pendingAccept: false,
+      settlement: settlement || 'Pending',
+      note: note || '',
+      to: r.to,
+      phone: r.phone || '',
+      email: r.email || '',
+      amount: r.amount,
+      ref: '',
+      status: 'pending',
+      created: 'now',
     }))
-    const batchTotal = items.reduce((s, r) => s + r.amount, 0)
     setState((prev) => ({
       ...prev,
-      promises: [...newPromises, ...prev.promises],
-      notifications: [
-        { id: 'n' + t, text: kindLabel + ' batch — ' + fmt(batchTotal) + ' to ' + items.length + ' via ' + issuerName + ' (SMS sent, accounts auto-created)' + (note ? ' — ' + note : ''), time: 'now' },
-        ...prev.notifications,
+      notifications: [{ id: 'n' + t, text: 'Sent ' + reqs.length + ' promise request' + (reqs.length === 1 ? '' : 's') + ' to the verification board', time: 'now' }, ...prev.notifications],
+      requests: [...reqs, ...prev.requests],
+    }))
+    showToast(reqs.length + ' request' + (reqs.length === 1 ? '' : 's') + ' sent for verification')
+    setTimeout(() => closePanel(), 800)
+  }
+
+  async function approveRequest(id) {
+    const r = state.requests.find((x) => x.id === id)
+    if (!r || r.status !== 'pending') return
+    setBusyId(id)
+    const t = Date.now()
+    const kindLabel = r.kind === 'escrow' ? 'Escrow-locked' : r.kind === 'in-transit' ? 'In-transit' : 'Trusted'
+    const results = await notifyIssued({ phone: r.phone, email: r.email, name: r.to, amount: fmt(r.amount), issuerName: r.issuerName, ref: r.ref || ('RL-' + t.toString().slice(-6)) })
+    const live = results.some((x) => !x.demo && x.ok)
+    setState((prev) => ({
+      ...prev,
+      promises: [
+        {
+          id: 'p-' + t,
+          amount: r.amount,
+          remaining: r.amount,
+          from: r.issuerName + ' (' + r.issuerType + ')',
+          to: r.to,
+          label: 'To ' + r.to,
+          settlement: r.settlement || 'Pending',
+          status: 'verified',
+          spendable: true,
+          health: r.kind === 'escrow' ? 'attention' : 'healthy',
+          kind: r.kind,
+          escrowRef: r.escrowRef || '',
+          pendingAccept: false,
+        },
+        ...prev.promises,
       ],
       payerPromises: [
-        ...items.map((r, i) => ({ id: 'pp' + t + '-' + i, amount: r.amount, to: r.to, phone: r.phone, settlement: settlement || 'Pending', status: 'verified', kind, issuerType, issuerName, escrowRef })),
+        { id: 'pp' + t, amount: r.amount, to: r.to, phone: r.phone, settlement: r.settlement || 'Pending', status: 'verified', kind: r.kind, issuerType: r.issuerType, issuerName: r.issuerName, escrowRef: r.escrowRef || '' },
         ...prev.payerPromises,
       ],
+      notifications: [
+        { id: 'n' + t, text: kindLabel + ' promise issued — ' + fmt(r.amount) + ' to ' + r.to + ' via ' + (live ? 'live SMS/email' : 'demo SMS/email'), time: 'now' },
+        ...prev.notifications,
+      ],
+      requests: prev.requests.map((x) => (x.id === id ? { ...x, status: 'approved' } : x)),
     }))
-    showToast('Issued ' + items.length + ' promise' + (items.length === 1 ? '' : 's') + ' — ' + fmt(batchTotal) + ' spendable now')
-    setTimeout(() => closePanel(), 800)
+    setBusyId(null)
+    showToast('Approved — ' + fmt(r.amount) + ' issued to ' + r.to + (live ? ' (live)' : ' (demo)'))
+  }
+
+  function rejectRequest(id) {
+    setState((prev) => ({ ...prev, requests: prev.requests.map((x) => (x.id === id ? { ...x, status: 'rejected' } : x)) }))
+    showToast('Request rejected')
+  }
+
+  function approveBusiness() {
+    setState((prev) => ({ ...prev, business: { ...prev.business, verified: true } }))
+    showToast('Business verified — trusted issuance unlocked')
+  }
+
+  function registerBusiness({ name, rc, type }) {
+    if (!name) {
+      showToast('Add a business name')
+      return
+    }
+    setState((prev) => ({ ...prev, business: { name, rc, type, verified: false } }))
+    showToast('Business submitted for verification')
+  }
+
+  function addWorker({ name, phone, email, salary }) {
+    if (!name || !salary || salary <= 0) {
+      showToast('Add worker name + salary')
+      return
+    }
+    const w = { id: 'w' + Date.now(), name, phone, email, salary }
+    setState((prev) => ({ ...prev, workers: [...prev.workers, w] }))
+    showToast(name + ' added to roster')
+  }
+
+  function removeWorker(id) {
+    setState((prev) => ({ ...prev, workers: prev.workers.filter((w) => w.id !== id), requests: prev.requests }))
+  }
+
+  function payWorkers(ids) {
+    const list = state.workers.filter((w) => ids.includes(w.id) && Number(w.salary) > 0)
+    if (list.length === 0) {
+      showToast('Select at least one worker with salary')
+      return
+    }
+    const t = Date.now()
+    const issuerName = state.business.name || 'Employer'
+    const reqs = list.map((w, i) => ({
+      id: 'rq' + t + '-' + i, kind: 'trusted', issuerType: 'employer', issuerName, escrowRef: '',
+      settlement: 'Month end', note: 'Salary', to: w.name, phone: w.phone || '', email: w.email || '',
+      amount: Number(w.salary), ref: '', status: 'pending', created: 'now',
+    }))
+    setState((prev) => ({ ...prev, requests: [...reqs, ...prev.requests] }))
+    showToast(list.length + ' salary requests sent for verification')
+  }
+
+  function createReceipt({ to, phone, email, amount, ref, settlement }) {
+    if (!to || !amount || amount <= 0) {
+      showToast('Add recipient + amount')
+      return
+    }
+    const issuerName = state.business.name || 'Payer'
+    const r = {
+      id: 'rq' + Date.now(), kind: 'in-transit', issuerType: state.business.type || 'other', issuerName, escrowRef: '',
+      settlement: settlement || 'Pending', note: '', to, phone: phone || '', email: email || '',
+      amount, ref: ref || '', status: 'pending', created: 'now',
+    }
+    setState((prev) => ({ ...prev, requests: [r, ...prev.requests] }))
+    showToast('In-transit receipt submitted for verification')
+  }
+
+  function lockEscrow({ purpose, amount, beneficiary, partner, release }) {
+    if (!purpose || !amount || amount <= 0) {
+      showToast('Add purpose + amount')
+      return
+    }
+    const e = { id: 'es' + Date.now(), purpose, amount, beneficiary, partner, release, status: 'locked' }
+    setState((prev) => ({ ...prev, escrows: [e, ...prev.escrows] }))
+    showToast(fmt(amount) + ' locked in escrow')
+  }
+
+  function buyClaim(id, discountPct) {
+    const p = state.promises.find((x) => x.id === id)
+    if (!p || p.remaining <= 0) {
+      showToast('Claim no longer available')
+      return
+    }
+    const price = Math.round(p.remaining * (1 - discountPct / 100))
+    setState((prev) => ({
+      ...prev,
+      available: prev.available + price,
+      promises: prev.promises.map((x) => (x.id === id ? { ...x, remaining: 0 } : x)),
+      lpPortfolio: [{ id: 'h' + Date.now(), claimId: id, face: p.remaining, paid: price, label: p.label, settlement: p.settlement }, ...prev.lpPortfolio],
+    }))
+    showToast('Bought for ' + fmt(price) + ' — collect ' + fmt(p.remaining) + ' on settlement')
+  }
+
+  function openReceipt(p) {
+    const edges = p.id === 'p-8472' && p.chain ? p.chain.edges : []
+    const nodes = [{ name: p.from || 'Issuer', amount: p.amount }, { name: 'You', amount: p.remaining }]
+    edges.forEach((e) => nodes.push({ name: e.to, amount: e.amount }))
+    setReceipt({
+      receipt: {
+        amount: p.amount,
+        from: p.from,
+        to: p.to,
+        ref: p.id.toUpperCase(),
+        settlement: p.settlement,
+        date: new Date().toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }),
+      },
+      nodes,
+    })
   }
 
   function acceptPromise(id) {
@@ -271,15 +419,27 @@ export default function App() {
       <div className="min-h-screen text-slate-900">
         <Auth
           initialPhone={state.user.phone}
-          onComplete={({ phone }) => {
-            setState((prev) => ({ ...prev, user: { ...prev.user, phone: phone || prev.user.phone, pinSet: true } }))
+          onComplete={({ phone, role }) => {
+            const landing = role === 'payer' ? 'business' : role === 'lp' ? 'lp' : role === 'admin' ? 'admin' : 'home'
+            setState((prev) => ({ ...prev, user: { ...prev.user, phone: phone || prev.user.phone, pinSet: true, role: role || 'user' } }))
+            setTab(landing)
             setAuthed(true)
             showToast('Welcome to Relay')
           }}
         />
-        <Toast message={toastMsg} show={toastShow} />
+      {receipt && (
+        <ReceiptZoom receipt={receipt.receipt} nodes={receipt.nodes} onClose={() => setReceipt(null)} />
+      )}
+
+      <Toast message={toastMsg} show={toastShow} />
       </div>
     )
+  }
+
+  function switchRole(role) {
+    const landing = role === 'payer' ? 'business' : role === 'lp' ? 'lp' : role === 'admin' ? 'admin' : 'home'
+    setState((prev) => ({ ...prev, user: { ...prev.user, role } }))
+    go(landing)
   }
 
   const nav = [
@@ -308,6 +468,8 @@ export default function App() {
               { key: 'home', label: 'Home', icon: 'ph-fill ph-house' },
               { key: 'activity', label: 'Activity', icon: 'ph-bold ph-receipt' },
               { key: 'business', label: 'Business', icon: 'ph-bold ph-bank' },
+              { key: 'lp', label: 'Liquidity Desk', icon: 'ph-bold ph-banknote' },
+              { key: 'admin', label: 'Verification', icon: 'ph-fill ph-shield-check' },
               { key: 'me', label: 'Profile', icon: 'ph-bold ph-user' },
             ].map((n) => (
               <button
@@ -317,13 +479,18 @@ export default function App() {
               >
                 <i className={`${n.icon} text-xl`}></i>
                 <span className="font-medium">{n.label}</span>
+                {n.key === 'admin' && state.requests.some((r) => r.status === 'pending') && (
+                  <span className="ml-auto w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                    {state.requests.filter((r) => r.status === 'pending').length}
+                  </span>
+                )}
               </button>
             ))}
             <button
               onClick={() => openLiquidity(null)}
               className="w-full flex items-center gap-4 px-4 py-3 rounded-2xl text-slate-500 hover:bg-white/60 hover:text-slate-900 transition-all"
             >
-              <i className="ph-bold ph-banknote text-xl"></i>
+              <i className="ph-bold ph-cash text-xl"></i>
               <span className="font-medium">Cash out</span>
             </button>
           </nav>
@@ -566,7 +733,32 @@ export default function App() {
             </button>
             <h1 className="font-bold text-[24px] tracking-tight mb-1">Business</h1>
             <p className="text-[13px] text-slate-500 mb-5">Issue verified future payments — employer, bank, merchant. Recipients spend before settlement.</p>
-            <PayerDashboard state={state} onIssue={issueBatch} />
+            <PayerDashboard
+              state={state}
+              onIssue={issueBatch}
+              onRegisterBusiness={registerBusiness}
+              onAddWorker={addWorker}
+              onRemoveWorker={removeWorker}
+              onPayWorkers={payWorkers}
+              onCreateReceipt={createReceipt}
+              onLockEscrow={lockEscrow}
+            />
+          </div>
+        )}
+
+        {tab === 'lp' && (
+          <div className="anim-drift-in">
+            <h1 className="font-bold text-[24px] tracking-tight mb-1">Liquidity Desk</h1>
+            <p className="text-[13px] text-slate-500 mb-5">Buy spendable claims at a discount — collect face value on settlement.</p>
+            <LPDashboard state={state} onBuy={buyClaim} />
+          </div>
+        )}
+
+        {tab === 'admin' && (
+          <div className="anim-drift-in">
+            <h1 className="font-bold text-[24px] tracking-tight mb-1">Verification Board</h1>
+            <p className="text-[13px] text-slate-500 mb-5">Review promise requests — approval issues them by SMS and email.</p>
+            <AdminBoard state={state} onApprove={approveRequest} onReject={rejectRequest} onApproveBusiness={approveBusiness} busyId={busyId} />
           </div>
         )}
 
@@ -582,6 +774,25 @@ export default function App() {
               <button onClick={() => { setAuthed(false); setTab('home') }} className="w-11 h-11 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-500 tap-target" title="Sign out">
                 <i className="ph-bold ph-sign-out text-lg"></i>
               </button>
+            </div>
+
+            <div className="glass-card rounded-[28px] p-5 mb-4">
+              <h3 className="font-bold text-[15px] mb-3">Workspace</h3>
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400 mb-2">Acting as · {state.user.role || 'user'}</p>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { k: 'user', l: 'Personal', icon: 'ph-fill ph-user' },
+                  { k: 'payer', l: 'Payer', icon: 'ph-fill ph-bank' },
+                  { k: 'lp', l: 'LP Desk', icon: 'ph-fill ph-banknote' },
+                  { k: 'admin', l: 'Admin', icon: 'ph-fill ph-shield-check' },
+                ].map((r) => (
+                  <button key={r.k} onClick={() => switchRole(r.k)}
+                    className={`tap-target rounded-2xl border py-2.5 flex flex-col items-center gap-1 ${state.user.role === r.k ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-200 text-slate-500'}`}>
+                    <i className={`${r.icon} text-lg`}></i>
+                    <span className="text-[10px] font-bold">{r.l}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             <button onClick={() => go('business')} className="w-full dark-card rounded-[28px] p-5 text-white flex items-center gap-4 mb-4 text-left">
@@ -632,8 +843,8 @@ export default function App() {
           <button onClick={() => openLiquidity(null)} className="flex flex-col items-center justify-center w-12 h-12 text-slate-400 tap-target" aria-label="Cash out">
             <i className="ph-bold ph-banknote text-2xl"></i>
           </button>
-          <button onClick={() => go('me')} className={`flex flex-col items-center justify-center w-12 h-12 tap-target ${tab === 'me' || tab === 'business' ? 'text-slate-900' : 'text-slate-400'}`}>
-            <i className={`${tab === 'me' || tab === 'business' ? 'ph-fill ph-user' : 'ph-bold ph-user'} text-2xl`}></i>
+          <button onClick={() => go('me')} className={`flex flex-col items-center justify-center w-12 h-12 tap-target ${['me', 'business', 'lp', 'admin'].includes(tab) ? 'text-slate-900' : 'text-slate-400'}`}>
+            <i className={`${['me', 'business', 'lp', 'admin'].includes(tab) ? 'ph-fill ph-user' : 'ph-bold ph-user'} text-2xl`}></i>
           </button>
         </div>
       </nav>
@@ -682,6 +893,7 @@ export default function App() {
             <div className="flex gap-2 flex-wrap">
               <Btn variant="secondary" onClick={() => { closePanel(); setTimeout(() => openLiquidity(activeClaim.id), 250) }}>Cash out</Btn>
               <Btn variant="secondary" onClick={() => { setChainDetail(null); setActivePanel('chain') }}>Chain</Btn>
+              <Btn variant="secondary" onClick={() => { openReceipt(activeClaim); }}>Receipt</Btn>
               <Btn variant="secondary" onClick={() => setActivePanel('health')}>Health</Btn>
               {activeClaim.id === 'p-8472' && <Btn variant="secondary" onClick={settleChain}>Settle (demo)</Btn>}
             </div>

@@ -7,9 +7,16 @@ export default function Auth({ initialPhone, onComplete }) {
   const [phone, setPhone] = useState(initialPhone || '')
   const [code, setCode] = useState('')
   const [pin, setPin] = useState('')
+  const [role, setRole] = useState('user')
   const [err, setErr] = useState('')
 
   const DEMO_CODE = '8472'
+  const ROLES = [
+    { k: 'user', l: 'Personal', d: 'Spend & forward promises', icon: 'ph-fill ph-user' },
+    { k: 'payer', l: 'Payer', d: 'Employer / bank issuance', icon: 'ph-fill ph-bank' },
+    { k: 'lp', l: 'Liquidity', d: 'Buy claims at discount', icon: 'ph-fill ph-banknote' },
+    { k: 'admin', l: 'Admin', d: 'Verification board', icon: 'ph-fill ph-shield-check' },
+  ]
 
   function sendCode() {
     if (phone.replace(/\D/g, '').length < 7) {
@@ -34,7 +41,7 @@ export default function Auth({ initialPhone, onComplete }) {
       setErr('Choose at least a 4-digit PIN.')
       return
     }
-    onComplete({ phone: phone.trim(), pin })
+    onComplete({ phone, pin, role })
   }
 
   return (
@@ -57,8 +64,20 @@ export default function Auth({ initialPhone, onComplete }) {
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 mb-2 px-1">Phone number = account number</label>
               <TextInput value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0803 123 4567" inputMode="tel" />
+              <label className="block text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 mt-4 mb-2 px-1">Sign in as</label>
+              <div className="grid grid-cols-2 gap-2">
+                {ROLES.map((r) => (
+                  <button key={r.k} onClick={() => setRole(r.k)} className={`tap-target text-left p-3 rounded-2xl border flex items-center gap-2.5 ${role === r.k ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white border-slate-200 btn-invert'}`}>
+                    <i className={`${r.icon} text-xl shrink-0`}></i>
+                    <span>
+                      <span className="block text-[13px] font-bold">{r.l}</span>
+                      <span className={`block text-[10.5px] ${role === r.k ? 'text-slate-300' : 'text-slate-400'}`}>{r.d}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
               <div className="mt-4"><Btn onClick={sendCode}>Continue</Btn></div>
-              <button onClick={() => onComplete({ phone: phone.trim() || '0803 123 4567', pin: '1234' })} className="w-full mt-3 text-[13px] font-semibold text-slate-500 hover:text-slate-900">
+              <button onClick={() => onComplete({ phone: phone.trim() || '0803 123 4567', pin: '1234', role })} className="w-full mt-3 text-[13px] font-semibold text-slate-500 hover:text-slate-900">
                 Skip — use demo account
               </button>
             </div>
