@@ -1,3 +1,3 @@
 export default function PanelTitle({ children }) {
-  return <h2 className="font-serif font-semibold text-[19px] mt-1 mb-4">{children}</h2>
+  return <h2 className="font-bold text-[20px] tracking-tight mt-1 mb-4 text-slate-900">{children}</h2>
 }

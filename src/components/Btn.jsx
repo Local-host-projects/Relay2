@@ -1,11 +1,11 @@
 export default function Btn({ children, onClick, variant = 'primary', className = '' }) {
-  const base = 'text-[13.5px] px-4 py-2.5 rounded-[9px] cursor-pointer text-center flex-1 border'
+  const base = 'text-[14px] font-semibold px-5 h-[52px] rounded-2xl cursor-pointer text-center flex-1 flex items-center justify-center gap-2'
   const styles =
     variant === 'primary'
-      ? 'bg-ink text-paper border-ink dark:bg-dink dark:text-dpaper dark:border-dink'
-      : 'bg-transparent text-ink border-ruleStrong dark:text-dink dark:border-druleStrong'
+      ? 'bg-slate-900 text-white shadow-xl shadow-slate-900/20 btn-invert'
+      : 'bg-white text-slate-900 border border-slate-200 shadow-sm btn-invert'
   return (
-    <button className={`${base} ${styles} active:opacity-80 ${className}`} onClick={onClick}>
+    <button className={`${base} ${styles} active:opacity-90 disabled:opacity-40 ${className}`} onClick={onClick}>
       {children}
     </button>
   )

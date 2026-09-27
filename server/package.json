@@ -1,0 +1,12 @@
+{
+  "name": "relay-notify",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Relay SMS + email delivery server (Termii + Resend). Zero dependencies.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node relay-notify.js"
+  }
+}
