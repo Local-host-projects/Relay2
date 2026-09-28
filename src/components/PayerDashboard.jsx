@@ -18,7 +18,7 @@ const PTABS = [
   { k: 'documents', l: 'Documents', icon: 'ph-bold ph-paperclip' },
 ]
 
-export default function PayerDashboard({ state, onIssue, onRegisterBusiness, onAddWorker, onRemoveWorker, onPayWorkers, onCreateReceipt, onLockEscrow, onSaveCard, onAddDocument, onRemoveDocument }) {
+export default function PayerDashboard({ state, onIssue, onRegisterBusiness, onAddWorker, onRemoveWorker, onPayWorkers, onCreateReceipt, onLockEscrow, onSaveCard, onAddDocument, onRemoveDocument, onRemoveCard }) {
   const [ptab, setPtab] = useState('overview')
   const [showSearch, setShowSearch] = useState(false)
   const [query, setQuery] = useState('')
@@ -132,7 +132,7 @@ export default function PayerDashboard({ state, onIssue, onRegisterBusiness, onA
       {ptab === 'workers' && <Workers workers={state.workers} onAdd={onAddWorker} onRemove={onRemoveWorker} onPay={onPayWorkers} />}
       {ptab === 'transit' && <TransitForm onCreate={onCreateReceipt} />}
       {ptab === 'escrow' && <EscrowSection escrows={state.escrows} onLock={onLockEscrow} />}
-      {ptab === 'payments' && <PaymentsSection card={state.accounts.payer ? state.accounts.payer.card : null} onSave={onSaveCard} />}
+      {ptab === 'payments' && <PaymentsSection card={state.accounts.payer ? state.accounts.payer.card : null} onSave={onSaveCard} onRemove={onRemoveCard} />}
       {ptab === 'documents' && <DocumentsSection docs={state.payerDocuments || []} onAdd={onAddDocument} onRemove={onRemoveDocument} />}
     </div>
   )

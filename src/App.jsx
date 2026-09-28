@@ -584,6 +584,23 @@ export default function App() {
     setState((prev) => ({ ...prev, payerDocuments: (prev.payerDocuments || []).filter((d) => d.id !== id) }))
   }
 
+  function removePersonalCard() {
+    setState((prev) => {
+      const { card, ...rest } = prev.accounts.personal
+      return { ...prev, accounts: { ...prev.accounts, personal: rest } }
+    })
+    showToast('Card removed - Puppy will pause until a new card is saved')
+  }
+
+  function removeBusinessCard() {
+    setState((prev) => {
+      if (!prev.accounts.payer) return prev
+      const { card, ...rest } = prev.accounts.payer
+      return { ...prev, accounts: { ...prev.accounts, payer: rest } }
+    })
+    showToast('Business card removed')
+  }
+
   const nav = [
     { key: 'home', label: 'Home', icon: 'ph-fill ph-house' },
     { key: 'activity', label: 'Activity', icon: 'ph-bold ph-receipt' },
@@ -887,6 +904,7 @@ export default function App() {
               onSaveCard={saveBusinessCard}
               onAddDocument={addPayerDocument}
               onRemoveDocument={removePayerDocument}
+              onRemoveCard={removeBusinessCard}
             />
           </div>
         )}
@@ -895,7 +913,7 @@ export default function App() {
           <div className="anim-drift-in">
             <h1 className="font-bold text-[24px] tracking-tight mb-1">Liquidity Desk</h1>
             <p className="text-[13px] text-slate-500 mb-5">Buy spendable claims at a discount — collect face value on settlement.</p>
-            <LPDashboard state={state} onBuy={buyClaim} onUpdateLPSettings={updateLPSettings} onSaveCard={saveLPCard} setAppState={setState} />
+            <LPDashboard state={state} onBuy={buyClaim} onUpdateLPSettings={updateLPSettings} onSaveCard={saveLPCard} onRemoveCard={removePersonalCard} setAppState={setState} />
           </div>
         )}
 

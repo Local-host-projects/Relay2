@@ -8,7 +8,7 @@ const USES = [
   { k: 'salary', l: 'Automatic salary runs' },
 ]
 
-export function PaymentsSection({ card, onSave }) {
+export function PaymentsSection({ card, onSave, onRemove }) {
   const [name, setName] = useState('')
   const [number, setNumber] = useState('')
   const [expiry, setExpiry] = useState('')
@@ -51,7 +51,10 @@ export function PaymentsSection({ card, onSave }) {
           <div className="rounded-2xl bg-slate-50 border border-slate-100 p-4 mb-3">
             <div className="flex items-center justify-between">
               <p className="font-bold text-[14px]">**** **** **** {card.last4}</p>
+              <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">On file</span>
+              <button onClick={onRemove} className="text-[10px] font-bold uppercase tracking-wider text-red-600 hover:text-red-700">Remove</button>
+            </div>
             </div>
             <p className="text-[11.5px] text-slate-400 mt-0.5">{card.name} - Exp {card.expiry}</p>
             <p className="text-[11.5px] text-slate-500 mt-1">

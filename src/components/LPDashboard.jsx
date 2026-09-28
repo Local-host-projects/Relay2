@@ -6,7 +6,7 @@ import Knob from './Knob'
 import PuppyDesk from './PuppyDesk'
 import TextInput from './TextInput'
 
-export default function LPDashboard({ state, onBuy, onUpdateLPSettings, onSaveCard, setAppState }) {
+export default function LPDashboard({ state, onBuy, onUpdateLPSettings, onSaveCard, onRemoveCard, setAppState }) {
   const [cardNumber, setCardNumber] = useState('')
   const [expiry, setExpiry] = useState('')
   const [cardName, setCardName] = useState('')
@@ -35,7 +35,10 @@ export default function LPDashboard({ state, onBuy, onUpdateLPSettings, onSaveCa
               <p className="font-bold text-[14px]">**** **** **** {state.accounts.personal.card.last4}</p>
               <p className="text-[11.5px] text-slate-400">{state.accounts.personal.card.name} - Exp {state.accounts.personal.card.expiry}</p>
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">On file</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">On file</span>
+              <button onClick={onRemoveCard} className="text-[10px] font-bold uppercase tracking-wider text-red-600 hover:text-red-700">Remove</button>
+            </div>
           </div>
         ) : (
           <p className="text-[12.5px] text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl p-3 mb-3">No card on file - settlements cannot route to you yet.</p>
