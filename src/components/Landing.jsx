@@ -59,7 +59,7 @@ export default function Landing({ onEnter }) {
       <header className="sticky top-0 z-40 glass-panel border-b border-white/60">
         <div className="max-w-6xl mx-auto px-5 h-16 flex items-center gap-6">
           <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="flex items-center gap-2.5">
-            <span className="w-9 h-9 bg-slate-900 rounded-xl flex items-center justify-center text-white font-bold text-xl italic">R</span>
+            <img src="/favicon.svg" alt="Relay" className="w-9 h-9 rounded-xl" />
             <span className="font-bold text-lg tracking-tight">Relay</span>
           </button>
           <nav className="hidden md:flex items-center gap-6 ml-6">

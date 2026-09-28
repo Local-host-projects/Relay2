@@ -598,7 +598,7 @@ export default function App() {
         <div>
           <div className="flex items-center gap-3 mb-10 px-2">
             <div className="w-10 h-10 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-lg">
-              <span className="font-bold text-2xl italic">R</span>
+              <img src="/favicon.svg" alt="Relay" className="w-full h-full rounded-[inherit]" />
             </div>
             <div>
               <h1 className="font-bold text-xl tracking-tight leading-none">Relay</h1>

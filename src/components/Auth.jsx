@@ -229,7 +229,7 @@ export default function Auth({ initialPhone, onComplete }) {
       <div className="w-full max-w-[420px]">
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 bg-slate-900 rounded-[20px] flex items-center justify-center text-white shadow-2xl mb-5">
-            <span className="font-bold text-3xl italic">R</span>
+            <img src="/favicon.svg" alt="Relay" className="w-full h-full rounded-[inherit]" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight">Relay</h1>
           <p className="text-slate-500 text-sm mt-1.5 text-center">{headline}</p>
