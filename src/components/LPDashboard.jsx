@@ -2,8 +2,13 @@ import { useState } from 'react'
 import Field from './Field'
 import Btn from './Btn'
 import { fmt } from '../lib/format'
+import Knob from './Knob'
+import TextInput from './TextInput'
 
-export default function LPDashboard({ state, onBuy }) {
+export default function LPDashboard({ state, onBuy, onUpdateLPSettings, onSaveCard }) {
+  const [cardNumber, setCardNumber] = useState('')
+  const [expiry, setExpiry] = useState('')
+  const [cardName, setCardName] = useState('')
   const [discount, setDiscount] = useState(3)
   const [selected, setSelected] = useState(null)
 
@@ -17,6 +22,53 @@ export default function LPDashboard({ state, onBuy }) {
 
   return (
     <div className="space-y-4">
+      <div className="glass-card rounded-[28px] p-5">
+        <h3 className="font-bold text-[16px] tracking-tight mb-1">LP discount range</h3>
+        <p className="text-[12px] text-slate-500 mb-3">Only offers within this % range are sent to you by the auction matcher.</p>
+        <div className="flex justify-around items-center gap-4 py-2">
+          <Knob
+            value={state.accounts.personal.lpSettings?.minDiscount ?? 2}
+            min={0}
+            max={20}
+            onChange={(v) => onUpdateLPSettings(Math.min(v, state.accounts.personal.lpSettings?.maxDiscount ?? 20), state.accounts.personal.lpSettings?.maxDiscount ?? 20)}
+            label="Min %"
+          />
+          <Knob
+            value={state.accounts.personal.lpSettings?.maxDiscount ?? 8}
+            min={0}
+            max={20}
+            onChange={(v) => onUpdateLPSettings(state.accounts.personal.lpSettings?.minDiscount ?? 2, Math.max(v, state.accounts.personal.lpSettings?.minDiscount ?? 2))}
+            label="Max %"
+          />
+        </div>
+      </div>
+
+      <div className="glass-card rounded-[28px] p-5">
+        <h3 className="font-bold text-[16px] tracking-tight mb-1">Payment method</h3>
+        <p className="text-[12px] text-slate-500 mb-3">Demo only - stores last 4 digits, not the full card. Settlement pays out here.</p>
+        {state.accounts.personal.card ? (
+          <div className="flex items-center justify-between rounded-2xl bg-slate-50 border border-slate-100 p-4 mb-3">
+            <div>
+              <p className="font-bold text-[14px]">**** **** **** {state.accounts.personal.card.last4}</p>
+              <p className="text-[11.5px] text-slate-400">{state.accounts.personal.card.name} - Exp {state.accounts.personal.card.expiry}</p>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">On file</span>
+          </div>
+        ) : (
+          <p className="text-[12.5px] text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl p-3 mb-3">No card on file - settlements cannot route to you yet.</p>
+        )}
+        <Field label="Cardholder name">
+          <TextInput value={cardName} onChange={(e) => setCardName(e.target.value)} placeholder="B. Bello" />
+        </Field>
+        <Field label="Card number">
+          <TextInput value={cardNumber} onChange={(e) => setCardNumber(e.target.value)} placeholder="4111 1111 1111 1111" inputMode="numeric" />
+        </Field>
+        <Field label="Expiry (MM/YY)">
+          <TextInput value={expiry} onChange={(e) => setExpiry(e.target.value)} placeholder="09/28" />
+        </Field>
+        <Btn className="mt-2" onClick={() => { onSaveCard(cardNumber, expiry, cardName); setCardNumber(''); }}>Save card</Btn>
+      </div>
+
       <div className="grid grid-cols-3 gap-2.5">
         {[
           { l: 'Deployed', v: fmt(deployed) },

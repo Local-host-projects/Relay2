@@ -1,7 +1,37 @@
 export function initialState() {
   return {
     available: 18200,
-    user: { phone: '0803 123 4567', relayId: 'B-0421', pinSet: true, role: 'user', name: 'Bello' },
+
+    // ── Distinct accounts (identity + auth only) ──
+    // These hold *credentials* for signing in as each identity — separate
+    // from `business` below, which stays the dashboard's actual data record
+    // (unverified/verified status, roster, etc.) so PayerDashboard and
+    // AdminBoard don't need to change. `payer` here starts null — there's no
+    // business identity to sign in as until someone actually registers one
+    // through the separate Payer auth flow.
+    accounts: {
+      personal: {
+        phone: '0803 123 4567',
+        relayId: 'B-0421',
+        pinSet: true,
+        name: 'Bello',
+        // A personal account can *opt in* to also act as a Liquidity Provider —
+        // intentionally the SAME account, not a separate identity, per the
+        // "regular users can double as LPs" rule. Payers, by contrast, are a
+        // fully separate registered account — that distinction is the point.
+        isLP: false,
+        lpSettings: { minDiscount: 2, maxDiscount: 8 }, // % — set on the LP-mode toggle screen
+      },
+      payer: null, // becomes { businessEmail, phone, pin } once registered via the Payer auth flow
+    },
+
+    // ── Session ──
+    // Which identity is currently signed in. Only one at a time — switching
+    // identity means signing out and re-authenticating as that identity, not
+    // flipping a `role` field on one shared session.
+    //   type: null | 'personal' | 'payer' | 'admin'
+    session: { type: null },
+
     business: { name: '', rc: '', type: 'employer', verified: false },
     workers: [
       { id: 'w1', name: 'Adaeze O.', phone: '0803 111 2222', email: 'adaeze@example.com', salary: 250000 },
@@ -13,8 +43,8 @@ export function initialState() {
     ],
     lpPortfolio: [],
     notifications: [
-      { id: 'n1', text: 'Promise #8472 verified — ₦5,000 spendable now', time: 'now' },
-      { id: 'n2', text: 'Salary promise verified — settles Sept 30', time: '2h' },
+      { id: 'n1', text: 'Promise #8472 verified — ₦5,000 spendable now', time: 'now', kind: 'promise', promiseId: 'p-8472', accepted: false },
+      { id: 'n2', text: 'Salary promise verified — settles Sept 30', time: '2h', kind: 'promise', promiseId: 'p-salary', accepted: true },
     ],
     promises: [
       {

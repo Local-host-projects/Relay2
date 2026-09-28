@@ -6,6 +6,7 @@ import { fmt } from '../lib/format'
 import { fetchStatus, sendSms, sendEmail } from '../lib/notify'
 
 export default function AdminBoard({ state, onApprove, onReject, onApproveBusiness, busyId, showToast }) {
+  const [expandedId, setExpandedId] = useState(null)
   const pending = state.requests.filter((r) => r.status === 'pending')
   const done = state.requests.filter((r) => r.status !== 'pending')
   const [rail, setRail] = useState({ sms: '…', email: '…', balance: null })
@@ -87,25 +88,50 @@ export default function AdminBoard({ state, onApprove, onReject, onApproveBusine
         <h3 className="font-bold text-[16px] tracking-tight mb-1">Verification queue</h3>
         <p className="text-[12px] text-slate-500 mb-3">Approve to issue the promise and notify by SMS + email.</p>
         <div className="space-y-3">
-          {pending.map((r) => (
-            <div key={r.id} className="rounded-2xl border border-slate-200 bg-white/70 p-4">
-              <div className="flex justify-between items-start gap-3">
-                <div className="min-w-0">
-                  <p className="font-bold text-[16px] tabular-nums">{fmt(r.amount)}</p>
-                  <p className="text-[12.5px] text-slate-600">To {r.to}{r.phone ? ' · ' + r.phone : ''}{r.email ? ' · ' + r.email : ''}</p>
-                  <p className="text-[11.5px] text-slate-400 mt-0.5">{r.issuerName} ({r.issuerType}) · {r.kind}{r.ref ? ' · ref ' + r.ref : ''}{r.escrowRef ? ' · escrow ' + r.escrowRef : ''}</p>
-                  <p className="text-[11.5px] text-slate-400">Settles {r.settlement}{r.note ? ' · ' + r.note : ''}</p>
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-100 shrink-0">pending</span>
+          {pending.map((r) => {
+            const isOpen = expandedId === r.id
+            return (
+              <div key={r.id} className="rounded-2xl border border-slate-200 bg-white/70 overflow-hidden">
+                <button
+                  onClick={() => setExpandedId(isOpen ? null : r.id)}
+                  className="w-full text-left p-4 flex justify-between items-start gap-3"
+                >
+                  <div className="min-w-0">
+                    <p className="font-bold text-[16px] tabular-nums">{fmt(r.amount)}</p>
+                    <p className="text-[12.5px] text-slate-600">To {r.to}{r.phone ? ' - ' + r.phone : ''}{r.email ? ' - ' + r.email : ''}</p>
+                    <p className="text-[11.5px] text-slate-400 mt-0.5">{r.issuerName} ({r.issuerType}) - {r.kind}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-100">pending</span>
+                    <i className={`ph-bold ph-caret-${isOpen ? 'up' : 'down'} text-slate-400`}></i>
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="px-4 pb-4 border-t border-slate-100 pt-3">
+                    <div className="space-y-1.5 text-[13px]">
+                      <div className="flex justify-between"><span className="text-slate-400">Amount</span><span className="font-bold tabular-nums">{fmt(r.amount)}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-400">Recipient</span><span className="font-semibold">{r.to}</span></div>
+                      {r.phone && <div className="flex justify-between"><span className="text-slate-400">Phone</span><span>{r.phone}</span></div>}
+                      {r.email && <div className="flex justify-between"><span className="text-slate-400">Email</span><span className="truncate ml-2">{r.email}</span></div>}
+                      <div className="flex justify-between"><span className="text-slate-400">Issuer</span><span>{r.issuerName} ({r.issuerType})</span></div>
+                      <div className="flex justify-between"><span className="text-slate-400">Kind</span><span>{r.kind}</span></div>
+                      {r.ref && <div className="flex justify-between"><span className="text-slate-400">Reference</span><span>{r.ref}</span></div>}
+                      {r.escrowRef && <div className="flex justify-between"><span className="text-slate-400">Escrow ref</span><span>{r.escrowRef}</span></div>}
+                      <div className="flex justify-between"><span className="text-slate-400">Settlement</span><span>{r.settlement}</span></div>
+                      {r.note && <div className="flex justify-between"><span className="text-slate-400">Note</span><span className="text-right ml-2">{r.note}</span></div>}
+                      <div className="flex justify-between"><span className="text-slate-400">Submitted</span><span>{r.created}</span></div>
+                    </div>
+                    <div className="flex gap-2 mt-4">
+                      <Btn onClick={() => onApprove(r.id)} className={busyId === r.id ? 'opacity-50 pointer-events-none' : ''}>
+                        {busyId === r.id ? 'Issuing...' : 'Approve & issue'}
+                      </Btn>
+                      <Btn variant="secondary" onClick={() => onReject(r.id)}>Reject</Btn>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="flex gap-2 mt-3">
-                <Btn onClick={() => onApprove(r.id)} className={busyId === r.id ? 'opacity-50 pointer-events-none' : ''}>
-                  {busyId === r.id ? 'Issuing…' : 'Approve & issue'}
-                </Btn>
-                <Btn variant="secondary" onClick={() => onReject(r.id)}>Reject</Btn>
-              </div>
-            </div>
-          ))}
+            )
+          })}
           {pending.length === 0 && <p className="text-[13px] text-slate-400 text-center py-2">Queue is clear.</p>}
         </div>
       </div>

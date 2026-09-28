@@ -55,6 +55,18 @@ export default function App() {
   }
 
   function go(t) {
+    if (t === 'business' && state.session?.type !== 'payer') {
+      showToast('Business dashboard is for Payer accounts - sign in as a business to access it')
+      return
+    }
+    if (t === 'admin' && state.session?.type !== 'admin') {
+      showToast('Admin board is staff-only - sign in with an admin account')
+      return
+    }
+    if (t === 'lp' && !(state.session?.type === 'personal' && state.accounts.personal.isLP)) {
+      showToast('Turn on Liquidity Provider mode in your profile to access the LP desk')
+      return
+    }
     setTab(t)
     closePanel()
     window.scrollTo({ top: 0 })
@@ -175,15 +187,42 @@ export default function App() {
     const target = state.promises.find((x) => x.id === liquidityClaimId)
     if (!target) return
     setAuctionStage('searching')
+
+    // Simulated LP pool, each with its own accepted discount range.
+    // If the signed-in user has LP mode on, their own wheels-based
+    // lpSettings participate too - not decorative, actually used here.
+    const pool = [
+      { name: 'Provider A', min: 2, max: 6 },
+      { name: 'Provider B', min: 1, max: 4 },
+      { name: 'Provider C', min: 3, max: 9 },
+      { name: 'Provider D', min: 4, max: 10 },
+    ]
+    if (state.accounts.personal.isLP) {
+      const { minDiscount = 2, maxDiscount = 8 } = state.accounts.personal.lpSettings || {}
+      pool.push({ name: 'You (LP mode)', min: minDiscount, max: maxDiscount })
+    }
+
+    // Each LP bids a discount somewhere inside its own accepted range and
+    // responds at a simulated speed. Only bids that respond within the
+    // cutoff window are considered - the auction clears fast rather than
+    // waiting for the slowest provider - then the cheapest (best-for-seller)
+    // bid among the timely ones wins. That's the "speed + efficient
+    // allocation" behavior in one pass.
+    const bids = pool.map((lp) => {
+      const discount = lp.min + Math.random() * (lp.max - lp.min)
+      const amount = Math.round(target.remaining * (1 - discount / 100))
+      const responseMs = 250 + Math.random() * 700
+      return { name: lp.name, amount, responseMs }
+    })
+
+    const fastCutoff = 900
+    const timely = bids.filter((b) => b.responseMs <= fastCutoff)
+    const finalBids = (timely.length > 0 ? timely : bids).sort((a, b) => b.amount - a.amount)
+
     setTimeout(() => {
-      const providers = [
-        { name: 'Provider A', amount: Math.round(target.remaining * 0.964) },
-        { name: 'Provider B', amount: Math.round(target.remaining * 0.978) },
-        { name: 'Provider C', amount: Math.round(target.remaining * 0.958) },
-      ]
-      setOffers(providers)
+      setOffers(finalBids)
       setAuctionStage('offers')
-    }, 900)
+    }, fastCutoff)
   }
 
   function acceptOffer(pr) {
@@ -418,28 +457,80 @@ export default function App() {
     return (
       <div className="min-h-screen text-slate-900">
         <Auth
-          initialPhone={state.user.phone}
-          onComplete={({ phone, role }) => {
-            const landing = role === 'payer' ? 'business' : role === 'lp' ? 'lp' : role === 'admin' ? 'admin' : 'home'
-            setState((prev) => ({ ...prev, user: { ...prev.user, phone: phone || prev.user.phone, pinSet: true, role: role || 'user' } }))
+          initialPhone={state.accounts.personal.phone}
+          onComplete={(result) => {
+            setState((prev) => {
+              const accounts = { ...prev.accounts }
+              let session, user
+
+              if (result.type === 'personal') {
+                accounts.personal = { ...prev.accounts.personal, phone: result.phone || prev.accounts.personal.phone, pinSet: true }
+                session = { type: 'personal' }
+                user = { phone: accounts.personal.phone, relayId: accounts.personal.relayId, name: accounts.personal.name, pinSet: true, role: 'user', isLP: accounts.personal.isLP }
+              } else if (result.type === 'payer') {
+                accounts.payer = { ...result.payer, pinSet: true, verified: false }
+                session = { type: 'payer' }
+                user = { phone: accounts.payer.phone, businessName: accounts.payer.businessName, businessEmail: accounts.payer.businessEmail, pinSet: true, role: 'payer', verified: false }
+              } else {
+                session = { type: 'admin' }
+                user = { role: 'admin', name: 'Staff' }
+              }
+              return { ...prev, accounts, session, user }
+            })
+
+            const landing = result.type === 'payer' ? 'business' : result.type === 'admin' ? 'admin' : 'home'
             setTab(landing)
             setAuthed(true)
             showToast('Welcome to Relay')
           }}
         />
-      {receipt && (
-        <ReceiptZoom receipt={receipt.receipt} nodes={receipt.nodes} onClose={() => setReceipt(null)} />
-      )}
-
-      <Toast message={toastMsg} show={toastShow} />
+        {receipt && (
+          <ReceiptZoom receipt={receipt.receipt} nodes={receipt.nodes} onClose={() => setReceipt(null)} />
+        )}
+        <Toast message={toastMsg} show={toastShow} />
       </div>
     )
   }
 
-  function switchRole(role) {
-    const landing = role === 'payer' ? 'business' : role === 'lp' ? 'lp' : role === 'admin' ? 'admin' : 'home'
-    setState((prev) => ({ ...prev, user: { ...prev.user, role } }))
-    go(landing)
+  function toggleLPMode() {
+    setState((prev) => ({
+      ...prev,
+      accounts: { ...prev.accounts, personal: { ...prev.accounts.personal, isLP: !prev.accounts.personal.isLP } },
+      user: { ...prev.user, isLP: !prev.accounts.personal.isLP },
+    }))
+  }
+
+  function acceptNotification(id) {
+    setState((prev) => {
+      const notif = prev.notifications.find((n) => n.id === id)
+      if (!notif) return prev
+      const hasPromise = notif.promiseId && prev.promises.some((p) => p.id === notif.promiseId)
+      return {
+        ...prev,
+        notifications: prev.notifications.map((n) => (n.id === id ? { ...n, accepted: true } : n)),
+        promises: hasPromise
+          ? prev.promises.map((p) => (p.id === notif.promiseId ? { ...p, pendingAccept: false, spendable: true } : p))
+          : prev.promises,
+      }
+    })
+    showToast('Promise accepted - added to your promise list')
+  }
+
+  function updateLPSettings(minDiscount, maxDiscount) {
+    setState((prev) => ({
+      ...prev,
+      accounts: { ...prev.accounts, personal: { ...prev.accounts.personal, lpSettings: { minDiscount, maxDiscount } } },
+    }))
+  }
+
+  function saveLPCard(cardNumber, expiry, name) {
+    const digits = cardNumber.replace(/\D/g, '')
+    const last4 = digits.slice(-4)
+    setState((prev) => ({
+      ...prev,
+      accounts: { ...prev.accounts, personal: { ...prev.accounts.personal, card: { last4, expiry, name } } },
+    }))
+    showToast('Card on file updated - settlement will route here')
   }
 
   const nav = [
@@ -750,7 +841,7 @@ export default function App() {
           <div className="anim-drift-in">
             <h1 className="font-bold text-[24px] tracking-tight mb-1">Liquidity Desk</h1>
             <p className="text-[13px] text-slate-500 mb-5">Buy spendable claims at a discount — collect face value on settlement.</p>
-            <LPDashboard state={state} onBuy={buyClaim} />
+            <LPDashboard state={state} onBuy={buyClaim} onUpdateLPSettings={updateLPSettings} onSaveCard={saveLPCard} />
           </div>
         )}
 
@@ -778,21 +869,18 @@ export default function App() {
 
             <div className="glass-card rounded-[28px] p-5 mb-4">
               <h3 className="font-bold text-[15px] mb-3">Workspace</h3>
-              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400 mb-2">Acting as · {state.user.role || 'user'}</p>
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  { k: 'user', l: 'Personal', icon: 'ph-fill ph-user' },
-                  { k: 'payer', l: 'Payer', icon: 'ph-fill ph-bank' },
-                  { k: 'lp', l: 'LP Desk', icon: 'ph-fill ph-banknote' },
-                  { k: 'admin', l: 'Admin', icon: 'ph-fill ph-shield-check' },
-                ].map((r) => (
-                  <button key={r.k} onClick={() => switchRole(r.k)}
-                    className={`tap-target rounded-2xl border py-2.5 flex flex-col items-center gap-1 ${state.user.role === r.k ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-200 text-slate-500'}`}>
-                    <i className={`${r.icon} text-lg`}></i>
-                    <span className="text-[10px] font-bold">{r.l}</span>
-                  </button>
-                ))}
-              </div>
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400 mb-2">Signed in as · {state.session?.type || 'personal'}</p>
+              {state.session?.type === 'personal' ? (
+                <button
+                  onClick={toggleLPMode}
+                  className={`tap-target w-full rounded-2xl border py-3 flex items-center justify-center gap-2 ${state.accounts.personal.isLP ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-200 text-slate-500'}`}
+                >
+                  <i className="ph-fill ph-banknote text-lg"></i>
+                  <span className="text-[13px] font-bold">{state.accounts.personal.isLP ? 'Also acting as Liquidity Provider' : 'Also act as Liquidity Provider'}</span>
+                </button>
+              ) : (
+                <p className="text-[12px] text-slate-400">Payer and Admin are separate accounts — sign out and sign in as that account type to switch.</p>
+              )}
             </div>
 
             <button onClick={() => go('business')} className="w-full dark-card rounded-[28px] p-5 text-white flex items-center gap-4 mb-4 text-left">
@@ -992,21 +1080,12 @@ export default function App() {
                 <p className="text-[13px] text-slate-400 py-2">No spendable claims right now.</p>
               </div>
             )
-          const profit = target.remaining - (selectedOffer ? selectedOffer.amount : lqTarget || 0)
-          const profitPct = target.remaining ? ((profit / target.remaining) * 100).toFixed(1) : '0.0'
           return (
             <div>
-              <PanelTitle>Cash out · {fmt(target.remaining)}</PanelTitle>
+              <PanelTitle>Cash out - {fmt(target.remaining)}</PanelTitle>
               <KV k="Settlement" v={target.settlement} />
               <KV k="Type" v={target.kind || 'claim'} />
-              <div className="rounded-3xl border border-slate-200 mt-4 mb-2 overflow-hidden">
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 px-4 py-2.5 bg-slate-50 border-b border-slate-100">Discount dials — drag to rotate</p>
-                <div className="flex justify-around items-center gap-4 py-5 bg-white">
-                  <Knob value={Number(lqMin) || 0} min={Math.round(target.remaining * 0.85)} max={target.remaining} onChange={setLqMin} label="Minimum" />
-                  <Knob value={Number(lqTarget) || 0} min={Math.round(target.remaining * 0.85)} max={target.remaining} onChange={setLqTarget} label="Target" />
-                </div>
-                <p className="text-[12px] font-semibold px-4 py-2.5 bg-slate-50 border-t border-slate-100">Provider keeps ~{fmt(Math.max(0, target.remaining - (Number(lqTarget) || 0)))} ({profitPct}%)</p>
-              </div>
+              <div className="mb-3"></div>
               {auctionStage === 'idle' && <Btn className="w-full" onClick={runAuction}>Find cash offers</Btn>}
               {auctionStage === 'searching' && (
                 <p className="text-[13px] text-slate-500 flex items-center gap-2 mt-3">
@@ -1016,7 +1095,7 @@ export default function App() {
               )}
               {auctionStage === 'offers' && (
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mt-4 mb-2">3 providers found</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mt-4 mb-2">{offers.length} provider{offers.length === 1 ? '' : 's'} found</p>
                   <div className="space-y-2">
                     {offers.map((pr) => {
                       const isSel = selectedOffer && selectedOffer.name === pr.name
@@ -1088,7 +1167,15 @@ export default function App() {
           state.notifications.map((n) => (
             <div key={n.id} className="py-3 border-b border-slate-100 last:border-b-0 text-[13.5px]">
               <p>{n.text}</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">{n.time} · SMS + in-app</p>
+              <div className="flex items-center justify-between mt-0.5">
+                <p className="text-[11px] text-slate-400">{n.time} · SMS + in-app</p>
+                {n.kind === 'promise' && !n.accepted && (
+                  <button onClick={() => acceptNotification(n.id)} className="text-[11px] font-bold uppercase tracking-wider text-white bg-slate-900 rounded-full px-3 py-1.5 tap-target">Accept</button>
+                )}
+                {n.kind === 'promise' && n.accepted && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Accepted</span>
+                )}
+              </div>
             </div>
           ))
         )}
