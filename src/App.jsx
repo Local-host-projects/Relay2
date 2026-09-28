@@ -317,7 +317,7 @@ export default function App() {
           health: r.kind === 'escrow' ? 'attention' : 'healthy',
           kind: r.kind,
           escrowRef: r.escrowRef || '',
-          pendingAccept: false,
+          pendingAccept: true,
         },
         ...prev.promises,
       ],
@@ -326,7 +326,7 @@ export default function App() {
         ...prev.payerPromises,
       ],
       notifications: [
-        { id: 'n' + t, text: kindLabel + ' promise issued — ' + fmt(r.amount) + ' to ' + r.to + ' via ' + (live ? 'live SMS/email' : 'demo SMS/email'), time: 'now' },
+        { id: 'n' + t, text: kindLabel + ' promise issued — ' + fmt(r.amount) + ' to ' + r.to + ' via ' + (live ? 'live SMS/email' : 'demo SMS/email'), time: 'now', kind: 'promise', promiseId: 'p-' + t, accepted: false },
         ...prev.notifications,
       ],
       requests: prev.requests.map((x) => (x.id === id ? { ...x, status: 'approved' } : x)),
