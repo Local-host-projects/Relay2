@@ -4,6 +4,7 @@ import Field from './Field'
 import TextInput from './TextInput'
 import Btn from './Btn'
 import Dot from './Dot'
+import { PaymentsSection, DocumentsSection } from './PayerExtras'
 import { fmt } from '../lib/format'
 
 const PTABS = [
@@ -13,9 +14,11 @@ const PTABS = [
   { k: 'workers', l: 'Workers', icon: 'ph-bold ph-users' },
   { k: 'transit', l: 'In-transit', icon: 'ph-bold ph-airplane-tilt' },
   { k: 'escrow', l: 'Escrow', icon: 'ph-bold ph-vault' },
+  { k: 'payments', l: 'Payments', icon: 'ph-bold ph-credit-card' },
+  { k: 'documents', l: 'Documents', icon: 'ph-bold ph-paperclip' },
 ]
 
-export default function PayerDashboard({ state, onIssue, onRegisterBusiness, onAddWorker, onRemoveWorker, onPayWorkers, onCreateReceipt, onLockEscrow }) {
+export default function PayerDashboard({ state, onIssue, onRegisterBusiness, onAddWorker, onRemoveWorker, onPayWorkers, onCreateReceipt, onLockEscrow, onSaveCard, onAddDocument, onRemoveDocument }) {
   const [ptab, setPtab] = useState('overview')
   const [showSearch, setShowSearch] = useState(false)
   const [query, setQuery] = useState('')
@@ -129,6 +132,8 @@ export default function PayerDashboard({ state, onIssue, onRegisterBusiness, onA
       {ptab === 'workers' && <Workers workers={state.workers} onAdd={onAddWorker} onRemove={onRemoveWorker} onPay={onPayWorkers} />}
       {ptab === 'transit' && <TransitForm onCreate={onCreateReceipt} />}
       {ptab === 'escrow' && <EscrowSection escrows={state.escrows} onLock={onLockEscrow} />}
+      {ptab === 'payments' && <PaymentsSection card={state.accounts.payer ? state.accounts.payer.card : null} onSave={onSaveCard} />}
+      {ptab === 'documents' && <DocumentsSection docs={state.payerDocuments || []} onAdd={onAddDocument} onRemove={onRemoveDocument} />}
     </div>
   )
 }

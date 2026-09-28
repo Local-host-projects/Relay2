@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { fmt } from './lib/format'
 import { initialState } from './state/initialState'
 
@@ -15,16 +15,39 @@ import SplitVisual from './components/SplitVisual'
 import ChainSvg from './components/ChainSvg'
 import Knob from './components/Knob'
 import Auth from './components/Auth'
+import Landing from './components/Landing'
 import PayerDashboard from './components/PayerDashboard'
 import LPDashboard from './components/LPDashboard'
 import AdminBoard from './components/AdminBoard'
 import ReceiptZoom from './components/ReceiptZoom'
 import { notifyIssued } from './lib/notify'
 
+function loadSaved(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key)
+    return raw === null ? fallback : JSON.parse(raw)
+  } catch {
+    return fallback
+  }
+}
+
+function saveKey(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+    return true
+  } catch {
+    return false
+  }
+}
+
 export default function App() {
-  const [state, setState] = useState(initialState())
-  const [authed, setAuthed] = useState(false)
-  const [tab, setTab] = useState('home') // home | activity | business | lp | admin | me
+  const [state, setState] = useState(() => {
+    const saved = loadSaved('relay:state', null)
+    return saved ? { ...initialState(), ...saved } : initialState()
+  })
+  const [authed, setAuthed] = useState(() => loadSaved('relay:authed', false) === true)
+  const [showLanding, setShowLanding] = useState(true)
+  const [tab, setTab] = useState(() => loadSaved('relay:tab', 'home')) // home | activity | business | lp | admin | me
   const [busyId, setBusyId] = useState(null)
   const [receipt, setReceipt] = useState(null) // {receipt, nodes} for ZUI viewer
   const [activePanel, setActivePanel] = useState(null) // claim | pay | transfer | chain | liquidity | health | notifications
@@ -42,6 +65,13 @@ export default function App() {
   const [kindFilter, setKindFilter] = useState('all')
   const [hideBal, setHideBal] = useState(false)
   const toastTimer = useRef(null)
+
+  useEffect(() => {
+    // Uploaded files can be large; if storage is full, keep everything except the files.
+    if (!saveKey('relay:state', state)) saveKey('relay:state', { ...state, payerDocuments: [] })
+  }, [state])
+  useEffect(() => { saveKey('relay:authed', authed) }, [authed])
+  useEffect(() => { saveKey('relay:tab', tab) }, [tab])
 
   function showToast(msg) {
     setToastMsg(msg)
@@ -454,6 +484,7 @@ export default function App() {
   })
 
   if (!authed) {
+    if (showLanding) return <Landing onEnter={() => setShowLanding(false)} />
     return (
       <div className="min-h-screen text-slate-900">
         <Auth
@@ -468,7 +499,8 @@ export default function App() {
                 session = { type: 'personal' }
                 user = { phone: accounts.personal.phone, relayId: accounts.personal.relayId, name: accounts.personal.name, pinSet: true, role: 'user', isLP: accounts.personal.isLP }
               } else if (result.type === 'payer') {
-                accounts.payer = { ...result.payer, pinSet: true, verified: false }
+                const { pin: _discardedPin, ...payerRest } = result.payer
+                accounts.payer = { ...payerRest, pinSet: true, verified: false }
                 session = { type: 'payer' }
                 user = { phone: accounts.payer.phone, businessName: accounts.payer.businessName, businessEmail: accounts.payer.businessEmail, pinSet: true, role: 'payer', verified: false }
               } else {
@@ -531,6 +563,25 @@ export default function App() {
       accounts: { ...prev.accounts, personal: { ...prev.accounts.personal, card: { last4, expiry, name } } },
     }))
     showToast('Card on file updated - settlement will route here')
+  }
+
+  function saveBusinessCard(cardNumber, expiry, name, uses) {
+    const digits = cardNumber.replace(/[^0-9]/g, '')
+    const last4 = digits.slice(-4)
+    setState((prev) => ({
+      ...prev,
+      accounts: { ...prev.accounts, payer: { ...(prev.accounts.payer || {}), card: { last4, expiry, name, uses } } },
+    }))
+    showToast('Business card saved - available for escrow and salary runs')
+  }
+
+  function addPayerDocument(doc) {
+    setState((prev) => ({ ...prev, payerDocuments: [doc, ...(prev.payerDocuments || [])] }))
+    showToast('Uploaded ' + doc.name)
+  }
+
+  function removePayerDocument(id) {
+    setState((prev) => ({ ...prev, payerDocuments: (prev.payerDocuments || []).filter((d) => d.id !== id) }))
   }
 
   const nav = [
@@ -833,6 +884,9 @@ export default function App() {
               onPayWorkers={payWorkers}
               onCreateReceipt={createReceipt}
               onLockEscrow={lockEscrow}
+              onSaveCard={saveBusinessCard}
+              onAddDocument={addPayerDocument}
+              onRemoveDocument={removePayerDocument}
             />
           </div>
         )}
