@@ -895,7 +895,7 @@ export default function App() {
           <div className="anim-drift-in">
             <h1 className="font-bold text-[24px] tracking-tight mb-1">Liquidity Desk</h1>
             <p className="text-[13px] text-slate-500 mb-5">Buy spendable claims at a discount — collect face value on settlement.</p>
-            <LPDashboard state={state} onBuy={buyClaim} onUpdateLPSettings={updateLPSettings} onSaveCard={saveLPCard} />
+            <LPDashboard state={state} onBuy={buyClaim} onUpdateLPSettings={updateLPSettings} onSaveCard={saveLPCard} setAppState={setState} />
           </div>
         )}
 

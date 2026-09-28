@@ -3,9 +3,10 @@ import Field from './Field'
 import Btn from './Btn'
 import { fmt } from '../lib/format'
 import Knob from './Knob'
+import PuppyDesk from './PuppyDesk'
 import TextInput from './TextInput'
 
-export default function LPDashboard({ state, onBuy, onUpdateLPSettings, onSaveCard }) {
+export default function LPDashboard({ state, onBuy, onUpdateLPSettings, onSaveCard, setAppState }) {
   const [cardNumber, setCardNumber] = useState('')
   const [expiry, setExpiry] = useState('')
   const [cardName, setCardName] = useState('')
@@ -22,26 +23,8 @@ export default function LPDashboard({ state, onBuy, onUpdateLPSettings, onSaveCa
 
   return (
     <div className="space-y-4">
-      <div className="glass-card rounded-[28px] p-5">
-        <h3 className="font-bold text-[16px] tracking-tight mb-1">LP discount range</h3>
-        <p className="text-[12px] text-slate-500 mb-3">Only offers within this % range are sent to you by the auction matcher.</p>
-        <div className="flex justify-around items-center gap-4 py-2">
-          <Knob
-            value={state.accounts.personal.lpSettings?.minDiscount ?? 2}
-            min={0}
-            max={20}
-            onChange={(v) => onUpdateLPSettings(Math.min(v, state.accounts.personal.lpSettings?.maxDiscount ?? 20), state.accounts.personal.lpSettings?.maxDiscount ?? 20)}
-            label="Min %"
-          />
-          <Knob
-            value={state.accounts.personal.lpSettings?.maxDiscount ?? 8}
-            min={0}
-            max={20}
-            onChange={(v) => onUpdateLPSettings(state.accounts.personal.lpSettings?.minDiscount ?? 2, Math.max(v, state.accounts.personal.lpSettings?.minDiscount ?? 2))}
-            label="Max %"
-          />
-        </div>
-      </div>
+      <PuppyDesk state={state} setAppState={setAppState} onUpdateLPSettings={onUpdateLPSettings} />
+      
 
       <div className="glass-card rounded-[28px] p-5">
         <h3 className="font-bold text-[16px] tracking-tight mb-1">Payment method</h3>
